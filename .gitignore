@@ -1,0 +1,6 @@
+PiDock/
+build/
+
+*.pyc
+*.sw?
+*.so

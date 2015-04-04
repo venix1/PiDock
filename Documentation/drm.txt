@@ -1,0 +1,1265 @@
+		Architecture of a DRM driver
+i		----------------------------
+
+Written by Laurent Pinchart <laurent.pinchart at ideasonboard.com>
+Last revised: May 30, 2012
+
+
+1. Driver initialization
+------------------------
+
+- Create a static struct drm_driver instance and register it at probe() time
+  with drm_platform_init(). This will call the DRM driver load() method, if
+  provided (why would the method not be provided?).
+
+  - int (*load) (struct drm_device *, unsigned long flags)
+
+  The method takes two arguments, a pointer to the newly created drm_device
+  and flags. The flags are used to pass the driver_data field of the device id
+  corresponding to the device passed to drm_*_init(). Only PCI devices
+  currently use this, USB and platform DRM drivers have their load() method
+  called with flags to 0.
+
+  The load method is responsible for performing resource allocation, hardware
+  initialization and DRM initialization. See the IRQ registration and KMS
+  initialization sections.
+
+  - int (*firstopen) (struct drm_device *)
+  - void (*lastclose) (struct drm_device *)
+  - int (*open) (struct drm_device *, struct drm_file *)
+  - void (*preclose) (struct drm_device *, struct drm_file *)
+  - void (*postclose) (struct drm_device *, struct drm_file *)
+
+  Open and close handlers. None of those methods are mandatory.
+
+  The .firstopen() method is called by the DRM core when an application opens
+  a device that has no other opened file handle. Similarly the .lastclose()
+  method is called when the last application holding a file handle opened on
+  the device closes it. Both methods are mostly used for UMS (User Mode
+  Setting) drivers to acquire and release device resources which should be
+  done in the .load() and .unload() methods for KMS drivers.
+
+  Note that the .lastclose() method is also called at module unload time or,
+  for hot-pluggable devices, when the device is unplugged. The .firstopen()
+  and .lastclose() calls can thus be unbalanced.
+
+  The .open() method is called every time the device is opened by an
+  application. Drivers can allocate per-file private data in this method and
+  store them in the struct drm_file::driver_priv field. Note that the .open()
+  method is called before .firstopen().
+
+  The close operation is split into .preclose() and .postclose() methods.
+  Drivers must stop and cleanup all per-file operations in the .preclose()
+  method. For instance pending vertical blanking and page flip events must be
+  cancelled. No per-file operation is allowed on the file handle after
+  returning from the .preclose() method.
+
+  Finally the .postclose() method is called as the last step of the close
+  operation, right before calling the .lastclose() method if no other open
+  file handle exists for the device. Drivers that have allocated per-file
+  private data in the .open() method should free it here.
+
+  - int (*suspend) (struct drm_device *, pm_message_t state)
+  - int (*resume) (struct drm_device *)
+
+  Legacy suspend and resume methos. New driver should use the power management
+  interface provided by their bus type (usually through the struct
+  device_driver dev_pm_ops) and set these methods to NULL.
+
+  - int (*enable_vblank) (struct drm_device *dev, int crtc)
+  - void (*disable_vblank) (struct drm_device *dev, int crtc)
+  - u32 (*get_vblank_counter) (struct drm_device *dev, int crtc)
+
+  Enable and disable vertical blanking interrupts and get the value of the
+  vblank counter for the given CRTC. See the Vertical Blanking and Page
+  Flipping section.
+
+  - int (*gem_init_object) (struct drm_gem_object *obj)
+  - void (*gem_free_object) (struct drm_gem_object *obj)
+
+  GEM object initialization and free handlers. The initialization handler is
+  only used in special cases and is optional. See the Memory Management
+  section.
+
+  - int (*prime_handle_to_fd)(struct drm_device *dev,
+			      struct drm_file *file_priv, uint32_t handle,
+			      uint32_t flags, int *prime_fd)
+  - int (*prime_fd_to_handle)(struct drm_device *dev,
+			      struct drm_file *file_priv, int prime_fd,
+			      uint32_t *handle)
+  - struct dma_buf * (*gem_prime_export)(struct drm_device *dev,
+  					 struct drm_gem_object *obj,
+					 int flags)
+  - struct drm_gem_object * (*gem_prime_import)(struct drm_device *dev,
+  						struct dma_buf *dma_buf)
+
+  DRM PRIME file descriptor management. See the Memory Management section.
+
+  - int (*dumb_create)(struct drm_file *file_priv, struct drm_device *dev,
+		       struct drm_mode_create_dumb *args)
+  - int (*dumb_map_offset)(struct drm_file *file_priv, struct drm_device *dev,
+  			   uint32_t handle, uint64_t *offset)
+  - int (*dumb_destroy)(struct drm_file *file_priv, struct drm_device *dev,
+			uint32_t handle)
+
+  Dumb GEM frame buffers management. See the Memory Management section.
+
+  - struct vm_operations_struct *gem_vm_ops
+
+  VMA operations for GEM objects. See the Memory Management section.
+
+  - major, minor, patchlevel
+
+  The driver major, minor and patch level versions, printed to the kernel log
+  at initialization time and passed to userspace through DRM_IOCTL_VERSION.
+
+  The major and minor numbers are also used to verify the requested driver API
+  version passed to DRM_IOCTL_SET_VERSION. When the driver API changes between
+  minor versions, applications can call DRM_IOCTL_SET_VERSION to select a
+  specific version of the API. If the requested major isn't equal to the
+  driver major, or the requested minor is larger than the driver minor, the
+  DRM_IOCTL_SET_VERSION call will return an error. Otherwise the driver's
+  set_version() method is called with the requested version.
+
+  - name
+
+  The driver name, printed to the kernel log at initialization time, used for
+  IRQ registration and passed to userspace through DRM_IOCTL_VERSION.
+
+  - desc
+
+  The driver description, passed to userspace through DRM_IOCTL_VERSION.
+
+  - date
+
+  The driver date as a string, printed to the kernel log at initialization time
+  and passed to userspace through DRM_IOCTL_VERSION.
+
+  - features
+
+  Bitfield of driver capabilities and requirements, used by the DRM core to
+  decide whether and how to implement parts of the DRM API.
+
+    DRIVER_USE_AGP - The DRM core will manage AGP resources
+    DRIVER_REQUIRE_AGP - Make AGP initialization failure a fatal error
+    DRIVER_USE_MTRR - The DRM core will manage MTRR resources
+    DRIVER_PCI_DMA - Enable mapping of PCI DMA buffers to userspace
+    DRIVER_SG - Enable SG buffers allocation and mapping
+    DRIVER_HAVE_DMA - Enable userspace DMA API
+    DRIVER_HAVE_IRQ - Make the DRM core register an interrupt handler
+    DRIVER_IRQ_SHARED - Make the interrupt handler shared
+    DRIVER_IRQ_VBL - Unused
+    DRIVER_DMA_QUEUE - ???
+    DRIVER_FB_DMA - Enable mapping of framebuffer DMA buffer to userspace
+    DRIVER_IRQ_VBL2 - Unused
+    DRIVER_GEM - Use the GEM memory manager
+    DRIVER_MODESET - The driver implements the KMS API
+    DRIVER_PRIME - The driver implements DRM PRIME buffer sharing
+
+  - struct drm_ioctl_desc *ioctls
+  - int num_ioctls
+
+  Driver-specific ioctls descriptors table.
+
+  Driver-specific ioctls numbers start at DRM_COMMAND_BASE. The ioctls
+  descriptors table is indexed by the ioctl number offset from the base value.
+  Drivers can use the DRM_IOCTL_DEF_DRV() macro to initialize the table
+  entries.
+
+  DRM_IOCTL_DEF_DRV(ioctl, func, flags)
+
+    - ioctl is the ioctl name. Drivers must define the DRM_##ioctl and
+      DRM_IOCTL_##ioctl macros to the ioctl number offset from
+      DRM_COMMAND_BASE and the ioctl number respectively. The first macro is
+      private to the device while the second must be exposed to userspace in a
+      public header.
+
+    - func is a pointer to the ioctl handler function compatible with the
+      drm_ioctl_t type.
+
+	typedef int drm_ioctl_t(struct drm_device *dev, void *data,
+				struct drm_file *file_priv);
+
+    - flags is a bitmask combination of the following values. It restricts how
+      the ioctl is allowed to be called.
+
+      DRM_AUTH - Only authenticated callers allowed
+      DRM_MASTER - The ioctl can only be called on the master file handle
+      DRM_ROOT_ONLY - Only callers with the SYSADMIN capability allowed
+      DRM_CONTROL_ALLOW - The ioctl can only be called on a control device
+      DRM_UNLOCKED - The ioctl handler will be called without locking the DRM
+        global mutex.
+
+  - const struct file_operations *fops
+
+  File operations for the DRM device node.
+
+  Drivers must define the file operations structure that forms the DRM
+  userspace API entry point, even though most of those operations are
+  implemented in the DRM core. The open, release and ioctl operations are
+  handled by
+
+  	.owner = THIS_MODULE,
+  	.open = drm_open,
+  	.release = drm_release,
+  	.unlocked_ioctl = drm_ioctl,
+  #ifdef CONFIG_COMPAT
+  	.compat_ioctl = drm_compat_ioctl,
+  #endif
+
+  Drivers that implement private ioctls that requires 32/64bit compatibility
+  support must provide their own .compat_ioctl() handler that processes
+  private ioctls and calls drm_compat_ioctl() for core ioctls.
+
+  The read and poll operations provide support for reading DRM events and
+  polling them. They are implemented by
+
+  	.poll = drm_poll,
+  	.read = drm_read,
+  	.fasync = drm_fasync,
+  	.llseek = no_llseek,
+
+  The memory mapping implementation varies depending on how the driver manages
+  memory. Pre-GEM drivers will use drm_mmap(), while GEM-aware drivers will
+  use drm_gem_mmap(). See the Memory Management section for more details.
+
+  	.mmap = drm_gem_mmap,
+
+  No other file operation is supported by the DRM API.
+
+
+2. IRQ registration
+-------------------
+
+The DRM core tries to facilitate IRQ handler registration and unregistration
+by providing drm_irq_install() and drm_irq_uninstall() methods. Those methods
+only support a single interrupt per device.
+
+Both functions get the device IRQ by calling drm_dev_to_irq(). This inline
+function will call a bus-specific operation to retrieve the IRQ number. For
+platform devices, platform_get_irq(..., 0) is used to retrieve the IRQ number.
+
+drm_irq_install() starts by calling the irq_preinstall() driver operation. The
+operation is optional and must make sure that the interrupt will not get fired
+by clearing all pending interrupt flags or disabling the interrupt.
+
+The IRQ will then be requested by a call to request_irq(). If the
+DRIVER_IRQ_SHARED driver feature flag is set, a shared (IRQF_SHARED) IRQ
+handler will be requested.
+
+The IRQ handler function must be provided as the mandatory irq_handler driver
+operation. It will get passed directly to request_irq() and thus has the same
+prototype as all IRQ handlers. It will get called with a pointer to the DRM
+device as the second argument.
+
+Finally the function calls the optional irq_postinstall() driver operation.
+The operation usually enables interrupts (excluding the vblank interrupt,
+which is enabled separately), but drivers may choose to enable/disable
+interrupts at a different time.
+
+drm_irq_uninstall() is similarly used to uninstall an IRQ handler. It starts
+by waking up all processes waiting on a vblank interrupt to make sure they
+don't hang, and then calls the optional irq_uninstall() driver operation. The
+operation must disable all hardware interrupts. Finally the function frees the
+IRQ by calling free_irq().
+
+
+3. KMS initialization
+---------------------
+
+Drivers must first initialize the mode configuration core by calling
+drm_mode_config_init() on the DRM device. The function initializes the
+drm_device::mode_config field and never fails. Once done, mode configuration
+must be setup by
+
+  - int min_width, min_height
+  - int max_width, max_height
+
+  Minimum and maximum width and height of the frame buffers in pixel units.
+
+  - struct drm_mode_config_funcs *funcs
+
+  Basic mode setting functions. See the Mode Setting Operations section for
+  details.
+
+
+A KMS device is abstracted and exposed as a set of planes, CRTCs, encoders and
+connectors. KMS drivers must thus create and initialize all those objects at
+load time.
+
+- CRCTs (struct drm_crtc)
+
+"A CRTC is an abstraction representing a part of the chip that contains a
+pointer to a scanout buffer. Therefore, the number of CRTCs available
+determines how many independent scanout buffers can be active at any given
+time. The CRTC structure contains several fields to support this: a pointer to
+some video memory (abstracted as a frame buffer object), a display mode, and
+an (x, y) offset into the video memory to support panning or configurations
+where one piece of video memory spans multiple CRTCs."
+
+A KMS device must create and register at least one struct drm_crtc instance.
+The instance is allocated and zeroed by the driver, possibly as part of a
+larger structure, and registered with a call to drm_crtc_init() with a pointer
+to CRTC functions.
+
+- Planes (struct drm_plane)
+
+A plane represents an image source that can be blended with or overlayed on
+top of a CRTC during the scanout process. Planes are associated with a frame
+buffer to crop a portion of the image memory (source) and optionally scale it
+to a destination size. The result is then blended with or overlayed on top of
+a CRTC.
+
+Planes are optional. To create a plane, a KMS drivers allocates and zeroes an
+instances of struct drm_plane (possible as part of a larger structure) and
+registers it with a call to drm_plane_init(). The function takes a bitmask of
+the CRTCs that can be associated with the plane, a pointer to the plane
+functions and a list of format supported formats.
+
+- Encoders (struct drm_encoder)
+
+"An encoder takes pixel data from a CRTC and converts it to a format suitable
+for any attached connectors. On some devices, it may be possible to have a
+CRTC send data to more than one encoder. In that case, both encoders would
+receive data from the same scanout buffer, resulting in a "cloned" display
+configuration across the connectors attached to each encoder."
+
+As for CRTCs, a KMS driver must create, initialize and register at least one
+struct drm_encoder instance. The instance is allocated and zeroed by the
+driver, possibly as part of a larger structure.
+
+Drivers must initialize the struct drm_encoder possible_crtcs and
+possible_clones fields before registering the encoder. Both fields are
+bitmasks of respectively the CRTCs that the encoder can be connected to, and
+sibling encoders candidate for cloning.
+
+After being initialized, the encoder must be registered with a call to
+drm_encoder_init(). The function takes a pointer to the encoder functions and
+an encoder type. Supported types are
+
+  DRM_MODE_ENCODER_DAC for VGA and analog on DVI-I/DVI-A
+  DRM_MODE_ENCODER_TMDS for DVI, HDMI and (embedded) DisplayPort
+  DRM_MODE_ENCODER_LVDS for display panels
+  DRM_MODE_ENCODER_TVDAC for TV output (Composite, S-Video, Component, SCART)
+  DRM_MODE_ENCODER_VIRTUAL for virtual machine displays
+
+Encoders must be attached to a CRTC to be used. DRM drivers leave encoders
+unattached at initialization time. Applications (or the fbdev compatibility
+layer when implemented) are responsible for attaching the encoders they want
+to use to a CRTC.
+
+- Connectors (struct drm_connector)
+
+"A connector is the final destination for pixel data on a device, and usually
+connects directly to an external display device like a monitor or laptop
+panel. A connector can only be attached to one encoder at a time. The
+connector is also the structure where information about the attached display
+is kept, so it contains fields for display data, EDID data, DPMS & connection
+status, and information about modes supported on the attached displays."
+
+Finally a KMS driver must create, initialize, register and attach at least one
+struct drm_connector instance. The instance is created as other KMS objects
+and initialized by setting the following fields.
+
+  interlace_allowed - whether the connector can handle interlaced modes
+  doublescan_allowed - whether the connector can handle doublescan
+  display_info - display information
+
+    Display information is filled from EDID information when a display is
+    detected. For non hot-pluggable displays such as flat panels in embedded
+    systems, the driver should initialize the display_info.width_mm and
+    display_info.height_mm fields with the physical size of the display.
+
+  polled - connector polling mode, a combination of
+
+    DRM_CONNECTOR_POLL_HPD
+      The connector generates hotplug events and doesn't need to be
+      periodically polled. The CONNECT and DISCONNECT flags must not be set
+      together with the HPD flag.
+    DRM_CONNECTOR_POLL_CONNECT
+      Periodically poll the connector for connection.
+    DRM_CONNECTOR_POLL_DISCONNECT
+      Periodically poll the connector for disconnection.
+
+    Set to 0 for connectors that don't support connection status discovery.
+
+The connector is then registered with a call to drm_connector_init() which
+a pointer to the connector functions and a connector type, and exposed through
+sysfs with a call to drm_sysfs_connector_add().
+
+Supported connector types are
+
+  DRM_MODE_CONNECTOR_VGA
+  DRM_MODE_CONNECTOR_DVII
+  DRM_MODE_CONNECTOR_DVID
+  DRM_MODE_CONNECTOR_DVIA
+  DRM_MODE_CONNECTOR_Composite
+  DRM_MODE_CONNECTOR_SVIDEO
+  DRM_MODE_CONNECTOR_LVDS
+  DRM_MODE_CONNECTOR_Component
+  DRM_MODE_CONNECTOR_9PinDIN
+  DRM_MODE_CONNECTOR_DisplayPort
+  DRM_MODE_CONNECTOR_HDMIA
+  DRM_MODE_CONNECTOR_HDMIB
+  DRM_MODE_CONNECTOR_TV
+  DRM_MODE_CONNECTOR_eDP
+  DRM_MODE_CONNECTOR_VIRTUAL
+
+Connectors must be attached to an encoder to be used. For devices that map
+connectors to encoders 1:1, the connector should be attached at initialization
+time with a call to drm_mode_connector_attach_encoder(). The driver must also
+set the drm_connector::encoder field to point to the attached encoder.
+
+
+Finally, drivers must initialize the connectors state change detection with a
+call to drm_kms_helper_poll_init(). If at least one connector is pollable but
+can't generate hotplug interrupts (indicated by the DRM_CONNECTOR_POLL_CONNECT
+and DRM_CONNECTOR_POLL_DISCONNECT connector flags), a delayed work will
+automatically be queued to periodically poll for changes. Connectors that can
+generate hotplug interrupts must be marked with the DRM_CONNECTOR_POLL_HPD
+flag instead, and their interrupt handler must call
+drm_helper_hpd_irq_event(). The function will queue a delayed work to check
+the state of all connectors, but no periodic polling will be done.
+
+
+4. KMS cleanup
+--------------
+
+The DRM core manages its objects' lifetime. When an object is not needed
+anymore the core calls its destroy function, which must clean up and free
+every resource allocated for the object. Every drm_*_init() call must be
+matched with a corresponding drm_*_cleanup() call to cleanup CRTCs
+(drm_crtc_cleanup), planes (drm_plane_cleanup), encoders (drm_encoder_cleanup)
+and connectors (drm_connector_cleanup). Furthermore, connectors that have been
+added to sysfs must be removed by a call to drm_sysfs_connector_remove()
+before calling drm_connector_cleanup().
+
+Connectors state change detection must be cleanup up with a call to
+drm_kms_helper_poll_fini().
+
+
+5. Vertical Blanking
+--------------------
+
+Vertical blanking plays a major role in graphics rendering. To achieve
+tear-free display, users must synchronize page flips and/or rendering to
+vertical blanking. The DRM API offers ioctls to perform page flips
+synchronized to vertical blanking and wait for vertical blanking.
+
+The DRM core handles most of the vertical blanking management logic, which
+involves filtering out spurious interrupts, keeping race-free blanking
+counters, coping with counter wrap-around and resets and keeping use counts.
+It relies on the driver to generate vertical blanking interrupts and
+optionally provide a hardware vertical blanking counter. Drivers must
+implement the following operations.
+
+  - int (*enable_vblank) (struct drm_device *dev, int crtc)
+  - void (*disable_vblank) (struct drm_device *dev, int crtc)
+
+  Enable or disable vertical blanking interrupts for the given CRTC.
+
+  - u32 (*get_vblank_counter) (struct drm_device *dev, int crtc)
+
+  Retrieve the value of the vertical blanking counter for the given CRTC. If
+  the hardware maintains a vertical blanking counter its value should be
+  returned. Otherwise drivers can use the drm_vblank_count() helper function
+  to handle this operation.
+
+Drivers must initialize the vertical blanking handling core with a call to
+drm_vblank_init() in their .load() operation. The function will set the struct
+drm_device vblank_disable_allowed field to 0. This will keep vertical blanking
+interrupts enabled permanently until the first mode set operation, where
+vblank_disable_allowed is set to 1. The reason behind this is not clear.
+Drivers can set the field to 1 after calling drm_vblank_init() to make
+vertical blanking interrupts dynamically managed from the beginning.
+
+Vertical blanking interrupts can be enabled by the DRM core or by drivers
+themselves (for instance to handle page flipping operations). The DRM core
+maintains a vertical blanking use count to ensure that the interrupts are not
+disabled while a user still needs them. To increment the use count, drivers
+call drm_vblank_get(). Upon return vertical blanking interrupts are guaranteed
+to be enabled.
+
+To decrement the use count drivers call drm_vblank_put(). Only when the use
+count drops to zero will the DRM core disable the vertical blanking
+interrupts after a delay by scheduling a timer. The delay is accessible
+through the vblankoffdelay module parameter or the drm_vblank_offdelay global
+variable and expressed in milliseconds. Its default value is 5000 ms.
+
+When a vertical blanking interrupt occurs drivers only need to call the
+drm_handle_vblank() function to account for the interrupt.
+
+Resources allocated by drm_vblank_init() must be freed with a call to
+drm_vblank_cleanup() in the driver .unload() operation handler.
+
+
+6. Memory Management
+--------------------
+
+Modern Linux systems require large amount of graphics memory to store frame
+buffers, textures, vertices and other graphics-related data. Given the very
+dynamic nature of many of that data, managing graphics memory efficiently is
+thus crucial for the graphics stack and plays a central role in the DRM
+infrastructure.
+
+The DRM core includes two memory managers, namely Translation Table Maps (TTM)
+and Graphics Execution Manager (GEM). TTM was the first DRM memory manager to
+be developed and tried to be a one-size-fits-them all solution. It provides a
+single userspace API to accomodate the need of all hardware. This resulted in
+a large, complex piece of code that turned out to be hard to use for driver
+development and.
+
+GEM started as an Intel-sponsored project in reaction to TTM's complexity. Its
+design philosophy is completely different: instead of providing a solution to
+every graphics memory-related problems, GEM identified common code between
+drivers and created a support library to share it.
+
+This document describes the use of the GEM memory manager only.
+
+The GEM design approach has resulted in a memory manager that doesn't provide
+full coverage of all (or even all common) use cass in its userspace or kernel
+API. GEM exposes a set of standard memory-related operations to userspace and
+a set of helper functions to drivers, and let drivers implement
+hardware-specific operations with their own private API.
+
+The GEM userspace API is described in http://lwn.net/Articles/283798/. While
+slightly outdated, the document provides a good overview of the GEM API
+principles. Buffer allocation and read and write operations, described as part
+of the common GEM API, are currently implemented using driver-specific ioctls.
+
+GEM is data-agnostic. It manages abstract buffer objects without knowing what
+individual buffers contain. APIs that require knowledge of buffer contents or
+purpose, such as buffer allocation or synchronization primitives, are thus
+outside of the scope of GEM and must be implemented using driver-specific
+ioctls.
+
+- GEM Initialization
+
+  Drivers that use GEM must set the DRIVER_GEM bit in the struct drm_driver
+  driver_features field. The DRM core will then automatically initialize the
+  GEM core before calling the .load() operation.
+
+- GEM Objects Creation
+
+  GEM splits creation of GEM objects and allocation of the memory that backs
+  them in two distinct operations.
+
+  GEM objects are represented by an instance of struct drm_gem_object. Drivers
+  usually need to extend GEM objects with private information and thus create
+  a driver-specific GEM object structure type that embeds an instance of
+  struct drm_gem_object.
+
+  To create a GEM object, a driver allocates memory for an instance of its
+  specific GEM object type and initializes the embedded struct drm_gem_object
+  with a call to drm_gem_object_init(). The function takes a pointer to the
+  DRM device, a pointer to the GEM object and the buffer object size in bytes.
+
+  GEM automatically allocate anonymous pageable memory through shmfs when an
+  object is initialized. drm_gem_object_init() will create an shmfs file of
+  the requested size and store it into the struct drm_gem_object filp field.
+  The memory is used as either main storage for the object when the graphics
+  hardware uses system memory directly or as a backing store otherwise.
+
+  Anonymous pageable memory allocation is not always desired, for instance
+  when the hardware requires physically contiguous system memory as is often
+  the case in embedded devices. Drivers can create GEM objects with no shmfs
+  backing (called private GEM objects) by initializing them with a call to
+  drm_gem_private_object_init() instead of drm_gem_object_init(). Storage for
+  private GEM objects must be managed by drivers.
+
+  Drivers that do no need to extend GEM objects with private information can
+  call the drm_gem_object_alloc() function to allocate and initialize a struct
+  drm_gem_object instance. The GEM core will call the optional driver
+  .gem_init_object() operation after initializing the GEM object with
+  drm_gem_object_init().
+
+  int (*gem_init_object) (struct drm_gem_object *obj)
+
+  No alloc-and-init function exists for private GEM objects.
+
+- GEM Objects Lifetime
+
+  All GEM objects are reference-counted by the GEM core. References can be
+  acquired and release by calling drm_gem_object_reference() and
+  drm_gem_object_unreference() respectively. The caller must hold the
+  drm_device struct_mutex lock. As a convenience, GEM provides the
+  drm_gem_object_reference_unlocked() and
+  drm_gem_object_unreference_unlocked() functions that can be called without
+  holding the lock.
+
+  When the last reference to a GEM object is released the GEM core calls the
+  drm_driver .gem_free_object() operation. That operation is mandatory for
+  GEM-enabled drivers and must free the GEM object and all associated
+  resources.
+
+  void (*gem_free_object) (struct drm_gem_object *obj)
+
+  Drivers are responsible for freeing all GEM object resources, including the
+  resources created by the GEM core. If an mmap offset has been created for
+  the object (in which case drm_gem_object::map_list::map is not NULL) it must
+  be freed by a call to drm_gem_free_mmap_offset(). The shmfs backing store
+  must be released by calling drm_gem_object_release() (that function can
+  safely be called if no shmfs backing store has been created).
+
+- GEM Objects Naming
+
+  Communication between userspace and the kernel refers to GEM objects using
+  local handles, global names or, more recently, file descriptors. All of
+  those are 32-bit integer values; the usual Linux kernel limits apply to the
+  file descriptors.
+
+  GEM handles are local to a DRM file. Applications get a handle to a GEM
+  object through a driver-specific ioctl, and can use that handle to refer
+  to the GEM object in other standard or driver-specific ioctls. Closing a DRM
+  file handle frees all its GEM handles and dereferences the associated GEM
+  objects.
+
+  To create a handle for a GEM object drivers call drm_gem_handle_create().
+  The function takes a pointer to the DRM file and the GEM object and returns
+  a locally unique handle. When the handle is no longer needed drivers delete
+  it with a call to drm_gem_handle_delete(). Finally the GEM object associated
+  with a handle can be retrieved by a call to drm_gem_object_lookup().
+
+  GEM names are similar in purpose to handles but are not local to DRM files.
+  They can be passed between processes to reference a GEM object globally.
+  Names can't be used directly to refer to objects in the DRM API,
+  applications must convert handles to names and names to handles using the
+  DRM_IOCTL_GEM_FLINK and DRM_IOCTL_GEM_OPEN ioctls respectively. The
+  conversion is handled by the DRM core without any driver-specific support.
+
+  Similar to global names, GEM file descriptors are also used to share GEM
+  objects across processes. They offer additional security: as file
+  descriptors must be explictly sent over UNIX domain sockets to be shared
+  between applications, they can't be guessed like the globally unique GEM
+  names.
+
+  Drivers that support GEM file descriptors, also known as the DRM PRIME API,
+  must set the DRIVER_PRIME bit in the struct drm_driver driver_features field
+  and implement the .prime_handle_to_fd() and .prime_fd_to_handle()
+  operations.
+
+  int (*prime_handle_to_fd)(struct drm_device *dev,
+			    struct drm_file *file_priv, uint32_t handle,
+			    uint32_t flags, int *prime_fd)
+  int (*prime_fd_to_handle)(struct drm_device *dev,
+			    struct drm_file *file_priv, int prime_fd,
+			    uint32_t *handle)
+
+  Those two operations convert a GEM handle to a PRIME file descriptor and
+  vice versa. While the PRIME file descriptors can be specific to a device,
+  their true power come from making them shareable between multiple devices
+  using the cross-subsystem dma-buf buffer sharing framework. For that reason
+  drivers are advised to use the drm_gem_prime_handle_to_fd() and
+  drm_gem_prime_fd_to_handle() helper functions as their PRIME operations
+  handlers.
+
+  The dma-buf PRIME helpers rely on the driver .gem_prime_export() and
+  .gem_prime_import() operations to create a dma-buf instance from a GEM
+  object (exporter role) and to create a GEM object from a dma-buf instance
+  (importer role). These two operations are mandatory when using dma-buf with
+  DRM PRIME.
+
+- GEM Objects Mapping
+
+  Because mapping operations are fairly heavyweight GEM favours read/write-
+  like access to buffers, implemented through driver-specific ioctls, over
+  mapping buffers to userspace. However, when random access to the buffer is
+  needed (to perform software rendering for instance), direct access to the
+  object can be more efficient.
+
+  The mmap system call can't be used directly to map GEM objects, as they
+  don't have their own file handle. Two alternative methods currently co-exist
+  to map GEM objects to userspace. The first method uses a driver-specific
+  ioctl to perform the mapping operation, calling do_mmap() under the hood.
+  This is often considered dubious, seems to be discouraged for new
+  GEM-enabled driver, and will thus not be described here.
+
+  The second method uses the mmap system call on the DRM file handle.
+
+  void *mmap(void *addr, size_t length, int prot, int flags, int fd,
+  	     off_t offset)
+
+  DRM identifies the GEM object to be mapped by a fake offset passed through
+  the mmap offset argument. Prior to being mapped, a GEM object must thus be
+  associated with a fake offset. To do so, drivers must call
+  drm_gem_create_mmap_offset() on the object. The function allocates a fake
+  offset range from a pool and stores the offset divided by PAGE_SIZE in
+  obj->map_list.hash.key. Care must be taken not to call
+  drm_gem_create_mmap_offset() if a fake offset has already been allocated for
+  the object. This can be tested by obj->map_list.map being non-NULL.
+
+  Once allocated, the fake offset value (obj->map_list.hash.key << PAGE_SHIFT)
+  must be passed to the application in a driver-specific way and can then be
+  used as the mmap offset argument.
+
+  The GEM core provides a helper method drm_gem_mmap() to handle object
+  mapping. The method can be set directly as the mmap file operation handler.
+  It will look up the GEM object based on the offset value and set the VMA
+  operations to the drm_driver gem_vm_ops field. Note that drm_gem_mmap()
+  doesn't map memory to userspace, but relies on the driver-provided fault
+  handler to map pages individually.
+
+  To use drm_gem_mmap(), drivers must fill the struct drm_driver gem_vm_ops
+  field with a pointer to VM operations.
+
+  struct vm_operations_struct *gem_vm_ops
+
+  struct vm_operations_struct {
+	void (*open)(struct vm_area_struct * area);
+	void (*close)(struct vm_area_struct * area);
+	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
+  }
+
+  The open and close operations must update the GEM object reference count.
+  Drivers can use the drm_gem_vm_open() and drm_gem_vm_close() helper
+  functions directly as open and close handlers.
+
+  The fault operation handler is responsible for mapping individual pages to
+  userspace when a page fault occurs. Depending on the memory allocation
+  scheme, drivers can allocate pages at fault time, or can decide to allocate
+  memory for the GEM object at the time the object is created.
+
+  Drivers that want to map the GEM object upfront instead of handling page
+  faults can implement their own mmap file operation handler.
+
+- Dumb GEM Objects
+
+  The GEM API doesn't standardize GEM objects creation and leaves it to
+  driver-specific ioctls. While not an issue for full-fledged graphics stacks
+  that include device-specific userspace components (in libdrm for instance),
+  this limit makes DRM-based early boot graphics unnecessarily complex.
+
+  Dumb GEM objects partly alleviate the problem by providing a standard API to
+  create dumb buffers suitable for scanout, which can then be used to create
+  KMS frame buffers.
+
+  To support dumb GEM objects drivers must implement the .dumb_create(),
+  .dumb_destroy() and .dumb_map_offset() operations.
+
+  int (*dumb_create)(struct drm_file *file_priv, struct drm_device *dev,
+		     struct drm_mode_create_dumb *args)
+
+  The .dumb_create() operation creates a GEM object suitable for scanout based
+  on the width, height and depth from the struct drm_mode_create_dumb
+  argument. It fills the argument's handle, pitch and size fields with a
+  handle for the newly created GEM object and its line pitch and size in
+  bytes.
+
+  int (*dumb_destroy)(struct drm_file *file_priv, struct drm_device *dev,
+		      uint32_t handle)
+
+  The .dumb_destroy() operation destroys a dumb GEM object created by
+  .dumb_create().
+
+  int (*dumb_map_offset)(struct drm_file *file_priv, struct drm_device *dev,
+  			 uint32_t handle, uint64_t *offset)
+
+  The .dumb_map_offset() operation associates an mmap fake offset with the GEM
+  object given by the handle and returns it. Drivers must use the
+  drm_gem_create_mmap_offset() function to associate the fake offset as
+  described in the GEM Objects Mapping section.
+
+
+7. Mid-layer
+------------
+
+The CRTC, encoder and connector functions provided by the drivers implement
+the DRM API. They're called by the DRM core and ioctl handlers to handle
+device state changes and configuration request. As implementing those
+functions often requires logic not specific to drivers, mid-layer helper
+functions are available to avoid duplicating boilerplate code.
+
+The DRM core contains one mid-layer implementation. The mid-layer provides
+implementations of several CRTC, encoder and connector functions (called from
+the top of the mid-layer) that pre-process requests and call lower-level
+functions provided by the driver (at the bottom of the mid-layer). For
+instance, the drm_crtc_helper_set_config() function can be used to fill the
+struct drm_crtc_funcs set_config field. When called, it will split the
+set_config operation in smaller, simpler operations and call the driver to
+handle them.
+
+To use the mid-layer, drivers call drm_crtc_helper_add(),
+drm_encoder_helper_add() and drm_connector_helper_add() functions to install
+their mid-layer bottom operations handlers, and fill the drm_crtc_funcs,
+drm_encoder_funcs and drm_connector_funcs structures with pointers to the
+mid-layer top API functions. Installing the mid-layer bottom operation
+handlers is best done right after registering the corresponding KMS object.
+
+The mid-layer is not split between CRTC, encoder and connector operations. To
+use it, a driver must provide bottom functions for all of the three KMS
+entities.
+
+
+8. Mode Setting Operations
+--------------------------
+
+- struct drm_framebuffer *(*fb_create)(struct drm_device *dev,
+				       struct drm_file *file_priv,
+				       struct drm_mode_fb_cmd2 *mode_cmd)
+
+  Create a new frame buffer.
+
+  Frame buffers are abstract memory objects that provide a source of pixels to
+  scanout to a CRTC. Applications explicitly request the creation of frame
+  buffers through the DRM_IOCTL_MODE_ADDFB(2) ioctls and receive an opaque
+  handle that can be passed to the KMS CRTC control, plane configuration and
+  page flip functions.
+
+  Frame buffers rely on the underneath memory manager for low-level memory
+  operations. When creating a frame buffer applications pass a memory handle
+  (or a list of memory handles for multi-planar formats) through the
+  drm_mode_fb_cmd2 argument. This document assumes that the driver uses GEM,
+  those handles thus reference GEM objects.
+
+  Drivers must first validate the requested frame buffer parameters passed
+  through the mode_cmd argument. In particular this is where invalid sizes,
+  pixel formats or pitches can be caught.
+
+  If the parameters are deemed valid, drivers then create, initialize and
+  return an instance of struct drm_framebuffer. If desired the instance can be
+  embedded in a larger driver-specific structure. The new instance is
+  initialized with a call to drm_framebuffer_init() which takes a pointer to
+  DRM frame buffer operations (struct drm_framebuffer_funcs). Frame buffer
+  operations are
+
+  - int (*create_handle)(struct drm_framebuffer *fb,
+			 struct drm_file *file_priv, unsigned int *handle)
+
+    Create a handle to the frame buffer underlying memory object. If the frame
+    buffer uses a multi-plane format, the handle will reference the memory
+    object associated with the first plane.
+
+    Drivers call drm_gem_handle_create() to create the handle.
+
+  - void (*destroy)(struct drm_framebuffer *framebuffer)
+
+    Destroy the frame buffer object and frees all associated resources.
+    Drivers must call drm_framebuffer_cleanup() to free resources allocated by
+    the DRM core for the frame buffer object, and must make sure to
+    unreference all memory objects associated with the frame buffer. Handles
+    created by the .create_handle() operation are released by the DRM core.
+
+  - int (*dirty)(struct drm_framebuffer *framebuffer,
+		 struct drm_file *file_priv, unsigned flags, unsigned color,
+		 struct drm_clip_rect *clips, unsigned num_clips)
+
+    This optional operation notifies the driver that a region of the frame
+    buffer has changed in response to a DRM_IOCTL_MODE_DIRTYFB ioctl call.
+
+  After initializing the drm_framebuffer instance drivers must fill its width,
+  height, pitches, offsets, depth, bits_per_pixel and pixel_format fields from
+  the values passed through the drm_mode_fb_cmd2 argument. They should call
+  the drm_helper_mode_fill_fb_struct() helper function to do so.
+
+- void (*output_poll_changed)(struct drm_device *dev)
+
+  This operation notifies the driver that the status of one or more connectors
+  has changed. Drivers that use the fbdev helper can just call the
+  drm_fb_helper_hotplug_event() function to handle this operation.
+
+
+9. CRTC Operations
+-------------------
+
+- void (*gamma_set)(struct drm_crtc *crtc, u16 *r, u16 *g, u16 *b,
+		    uint32_t start, uint32_t size)
+
+  Apply a gamma table to the device. The operation is optional.
+
+- void (*destroy)(struct drm_crtc *crtc)
+
+  Destroy the CRTC when not needed anymore. See the KMS cleanup section.
+
+- int (*set_config)(struct drm_mode_set *set)
+
+  Apply a new CRTC configuration to the device. The configuration specifies a
+  CRTC, a frame buffer to scan out from, a (x,y) position in the frame buffer,
+  a display mode and an array of connectors to drive with the CRTC if
+  possible.
+
+  If the frame buffer specified in the configuration is NULL, the driver must
+  detach all encoders connected to the CRTC and all connectors attached to
+  those encoders and disable them.
+
+  This operation is called with the mode config lock held.
+
+  (FIXME: How should set_config interact with DPMS? If the CRTC is suspended,
+  should it be resumed?)
+
+  The mid-layer provides a drm_crtc_helper_set_config() helper function. The
+  helper will try to locate the best encoder for each connector by calling the
+  connector .best_encoder helper operation. That operation is mandatory and
+  must return a pointer to the best encoder for the connector. For devices
+  that map connectors to encoders 1:1, the function simply returns the pointer
+  to the associated encoder.
+
+  After locating the appropriate encoders, the helper function will call the
+  mandatory mode_fixup encoder and CRTC helper operations.
+
+  - bool (*mode_fixup)(struct drm_encoder *encoder,
+		       const struct drm_display_mode *mode,
+		       struct drm_display_mode *adjusted_mode)
+  - bool (*mode_fixup)(struct drm_crtc *crtc,
+		       const struct drm_display_mode *mode,
+		       struct drm_display_mode *adjusted_mode)
+
+    (FIXME: Should the mode argument be const? The i915 driver modifies
+     mode->clock in intel_dp_mode_fixup().)
+
+    Let encoders and CRTC adjust the requested mode or reject it completely.
+    Those operations return true if the mode is accepted (possibly after being
+    adjusted) or false if it is rejected.
+
+    The mode_fixup operation should reject the mode if it can't reasonably use
+    it. The definition of "reasonable" is currently fuzzy in this context. One
+    possible behaviour would be to set the adjusted mode to the panel timings
+    when a fixed-mode panel is used with hardware capable of scaling. Anothe
+    behaviour would be to accept any input mode and adjust it to the closest
+    mode supported by the hardware (FIXME: This needs to be clarified).
+
+  If the new configuration after mode adjustment is identical to the current
+  configuration the helper function will return without performing any other
+  operation.
+
+  If the adjusted mode is identical to the current mode but changes to the
+  frame buffer need to be applied, the drm_crtc_helper_set_config() function
+  will call the CRTC .mode_set_base() helper operation.
+
+  - int (*mode_set_base)(struct drm_crtc *crtc, int x, int y,
+			 struct drm_framebuffer *old_fb)
+
+    Move the CRTC on the current frame buffer (stored in crtc->fb) to position
+    (x,y). Any of the frame buffer, x position or y position may have been
+    modified.
+
+    This helper operation is optional. If not provided, the
+    drm_crtc_helper_set_config() function will fall back to the .mode_set()
+    helper operation.
+
+    (FIXME: Why are x and y passed as arguments, as they can be accessed
+    through crtc->x and crtc->y?)
+
+  If the adjusted mode differs from the current mode, or if the
+  .mode_set_base() helper operation is not provided, the helper function
+  performs a full mode set sequence by calling the following mandatory
+  CRTC and encoder operations in order.
+
+  - void (*prepare)(struct drm_encoder *encoder)
+  - void (*prepare)(struct drm_crtc *crtc)
+
+    Those operations are called after validating the requested mode. Drivers
+    use them to perform device-specific operations required before setting the
+    new mode.
+
+  - int (*mode_set)(struct drm_crtc *crtc, struct drm_display_mode *mode,
+		    struct drm_display_mode *adjusted_mode, int x, int y,
+		    struct drm_framebuffer *old_fb)
+  - void (*mode_set)(struct drm_encoder *encoder,
+		     struct drm_display_mode *mode,
+		     struct drm_display_mode *adjusted_mode)
+
+    Those operations set the new mode. Depending on the device requirements,
+    the mode can be stored internally by the driver and applied in the commit
+    operations, or programmed to the hardware here.
+
+    The crtc::mode_set operation returns 0 on success or a negative error code
+    if an error occurs. The encoder::mode_set operation isn't allowed to fail.
+
+  - void (*commit)(struct drm_crtc *crtc)
+  - void (*commit)(struct drm_encoder *encoder)
+
+    Those operations are called after setting the new mode. Upon return the
+    device must use the new mode and be fully operational.
+
+- int (*page_flip)(struct drm_crtc *crtc, struct drm_framebuffer *fb,
+		   struct drm_pending_vblank_event *event)
+
+  Schedule a page flip to the given frame buffer for the CRTC. This operation
+  is called with the mode config mutex held.
+
+  Page flipping is a synchronization mechanism that replaces the frame buffer
+  being scanned out by the CRTC with a new frame buffer during vertical
+  blanking, avoiding tearing. When an application requests a page flip the DRM
+  core verifies that the new frame buffer is large enough to be scanned out by
+  the CRTC in the currently configured mode and then calls the CRTC
+  .page_flip() operation with a pointer to the new frame buffer.
+
+  The .page_flip() operation schedules a page flip. Once any pending rendering
+  targetting the new frame buffer has completed, the CRTC will be reprogrammed
+  to display that frame buffer after the next vertical refresh. The operation
+  must return immediately without waiting for rendering or page flip to
+  complete and must block any new rendering to the frame buffer until the page
+  flip completes.
+
+  If a page flip is already pending, the .page_flip() operation must return
+  -EBUSY.
+
+  (FIXME: Should DRM allow queueing multiple page flips?)
+
+  To synchronize page flip to vertical blanking the driver will likely need to
+  enable vertical blanking interrupts. It should call drm_vblank_get() for
+  that purpose, and call drm_vblank_put() after the page flip completes.
+
+  If the application has requested to be notified when page flip completes the
+  .page_flip() operation will be called with a non-NULL event argument
+  pointing to a drm_pending_vblank_event instance. Upon page flip completion
+  the driver must fill the event::event sequence, tv_sec and tv_usec fields
+  with the associated vertical blanking count and timestamp, add the event to
+  the drm_file list of events to be signaled, and wake up any waiting process.
+  This can be performed with
+
+	struct timeval now;
+
+	event->event.sequence = drm_vblank_count_and_time(..., &now);
+	event->event.tv_sec = now.tv_sec;
+	event->event.tv_usec = now.tv_usec;
+
+	spin_lock_irqsave(&dev->event_lock, flags);
+	list_add_tail(&event->base.link, &event->base.file_priv->event_list);
+	wake_up_interruptible(&event->base.file_priv->event_wait);
+	spin_unlock_irqrestore(&dev->event_lock, flags);
+
+  (FIXME: Could drivers that don't need to wait for rendering to complete just
+   add the event to dev->vblank_event_list and let the DRM core handle
+   everything, as for "normal" vertical blanking events?)
+
+  While waiting for the page flip to complete, the event->base.link list head
+  can be used freely by the driver to store the pending event in a
+  driver-specific list.
+
+  If the file handle is closed before the event is signaled, drivers must take
+  care to destroy the event in their .preclose() operation (and, if needed,
+  call drm_vblank_put()).
+
+
+10. Plane Operations
+-------------------
+
+- int (*update_plane)(struct drm_plane *plane, struct drm_crtc *crtc,
+		      struct drm_framebuffer *fb, int crtc_x, int crtc_y,
+		      unsigned int crtc_w, unsigned int crtc_h,
+		      uint32_t src_x, uint32_t src_y,
+		      uint32_t src_w, uint32_t src_h)
+
+  Enable and configure the plane to use the given CRTC and frame buffer.
+
+  The source rectangle in frame buffer memory coordinates is given by the
+  src_x, src_y, src_w and src_h parameters (as 16.16 fixed point values).
+  Devices that don't support subpixel plane coordinates can ignore the
+  fractional part.
+
+  The destination rectangle in CRTC coordinates is given by the crtc_x,
+  crtc_y, crtc_w and crtc_h parameters (as integer values). Devices scale
+  the source rectangle to the destination rectangle. If scaling is not
+  supported, the src_w and src_h values can be ignored.
+
+- int (*disable_plane)(struct drm_plane *plane)
+
+  Disable the plane. The DRM core calls this method in response to a
+  DRM_IOCTL_MODE_SETPLANE ioctl call with the frame buffer ID set to 0.
+  Disabled planes must not be processed by the CRTC.
+
+- void (*destroy)(struct drm_plane *plane)
+
+  Destroy the plane when not needed anymore. See the KMS cleanup section.
+
+
+11. Encoder Operations
+----------------------
+
+- void (*destroy)(struct drm_encoder *encoder)
+
+  Called to destroy the encoder when not needed anymore. See the KMS cleanup
+  section.
+
+
+12. Connector Operations
+------------------------
+
+Unless otherwise state, all operations are mandatory.
+
+- status - connection status (connected, disconnected, unknown)
+
+  The connection status is updated through polling or hotplug events when
+  supported (see the polled field description). The status value is reported
+  to userspace through ioctls and must not be used inside the driver, as it
+  only gets initialized by a call to drm_mode_getconnector() from userspace.
+
+- void (*dpms)(struct drm_connector *connector, int mode)
+
+  The DPMS operation sets the power state of a connector. The mode argument is
+  one of
+
+  DRM_MODE_DPMS_ON
+  DRM_MODE_DPMS_STANDBY
+  DRM_MODE_DPMS_SUSPEND
+  DRM_MODE_DPMS_OFF
+
+  In all but DPMS_ON mode the encoder to which the connector is attached
+  should put the display in low-power mode by driving its signals appropriately.
+  If more than one connector is attached to the encoder care should be taken
+  not to change the power state of other displays as a side effect. Low-power
+  mode should be propagated to the encoders and CRTCs when all related
+  connectors are put in low-power mode.
+
+  The mid-layer offers a drm_helper_connector_dpms() helper function that
+  tracks power state of connectors. When using the helper function drivers
+  only need to provide .dpms helper operations for CRTCs and encoders to apply
+  the DPMS state to the device.
+
+  The mid-layer doesn't track the power state of CRTCs and encoders. The .dpms
+  operations can thus be called with a mode identical to the currently active
+  mode.
+
+- enum drm_connector_status (*detect)(struct drm_connector *connector,
+				      bool force)
+
+  Check to see if anything is attached to the connector. @force is set to
+  false whilst polling, true when checking the connector due to user request.
+  @force can be used by the driver to avoid expensive, destructive operations
+  during automated probing.
+
+  Return connector_status_connected if something is connected to the
+  connector, connector_status_disconnected if nothing is connected and
+  connector_status_unknown if the connection state isn't known.
+
+  Drivers should only return connector_status_connected if the connection
+  status has really been probed as connected. Connectors that can't detect the
+  connection status, or failed connection status probes, should return
+  connector_status_unknown.
+
+- int (*fill_modes)(struct drm_connector *connector, uint32_t max_width,
+		    uint32_t max_height)
+
+  Fill the mode list with all supported modes for the connector. If the
+  max_width and max_height arguments are non-zero, the implementation must
+  ignore all modes wider than max_width or higher than max_height.
+
+  The connector must also fill in this operation its display_info width_mm and
+  height_mm fields with the connected display physical size in millimeters.
+  The fields should be set to 0 if the value isn't known or is not applicable
+  (for instance for projector devices).
+
+  The mid-layer provides a drm_helper_probe_single_connector_modes() helper
+  function. The helper updates the connection status for the connector and
+  then retrieves a list of modes by calling the connector .get_modes helper
+  operation.
+
+  The .get_modes helper operation is mandatory. It must fill the connector's
+  probed_modes list by parsing EDID data with drm_add_edid_modes() or calling
+  drm_mode_probed_add() directly for every supported mode. The operation
+  returns the number of modes it has detected.
+
+  When adding modes manually the driver creates each mode with a call to
+  drm_mode_create() and must fill the following fields.
+
+  - type: Mode type bitmask, a combination of
+
+    DRM_MODE_TYPE_BUILTIN - not used?
+    DRM_MODE_TYPE_CLOCK_C - not used?
+    DRM_MODE_TYPE_CRTC_C - not used?
+    DRM_MODE_TYPE_PREFERRED - The preferred mode for the connector
+    DRM_MODE_TYPE_DEFAULT - not used?
+    DRM_MODE_TYPE_USERDEF - not used?
+    DRM_MODE_TYPE_DRIVER - The mode has been created by the driver (as opposed
+                           to user-created modes)
+
+    Drivers must set the DRM_MODE_TYPE_DRIVER bit for all modes they create,
+    and set the DRM_MODE_TYPE_PREFERRED bit for the preferred mode.
+
+  - clock: Pixel clock frequency in kHz unit
+
+  - hdisplay, hsync_start, hsync_end, htotal: Horizontal timing information
+  - vdisplay, vsync_start, vsync_end, vtotal: Vertical timing information
+
+             Active                 Front           Sync           Back
+             Region                 Porch                          Porch
+ <-----------------------><----------------><-------------><-------------->
+
+      //////////////////////|
+     ////////////////////// |
+    //////////////////////  |..................................
+                                               _______________
+
+    <----- [hv]display ----->
+    <------------- [hv]sync_start ------------>
+    <--------------------- [hv]sync_end --------------------->
+    <-------------------------------- [hv]total ----------------------------->
+
+  - hskew, vscan: ?
+
+  - flags: Mode flags, a combination of
+
+    DRM_MODE_FLAG_PHSYNC - Horizontal sync is active high
+    DRM_MODE_FLAG_NHSYNC - Horizontal sync is active low
+    DRM_MODE_FLAG_PVSYNC - Vertical sync is active high
+    DRM_MODE_FLAG_NVSYNC - Vertical sync is active low
+    DRM_MODE_FLAG_INTERLACE - Mode is interlaced
+    DRM_MODE_FLAG_DBLSCAN - Mode uses doublescan
+    DRM_MODE_FLAG_CSYNC - Mode uses composite sync
+    DRM_MODE_FLAG_PCSYNC - Composite sync is active high
+    DRM_MODE_FLAG_NCSYNC - Composite sync is active low
+    DRM_MODE_FLAG_HSKEW - hskew provided (not used?)
+    DRM_MODE_FLAG_BCAST - not used?
+    DRM_MODE_FLAG_PIXMUX - not used?
+    DRM_MODE_FLAG_DBLCLK - not used?
+    DRM_MODE_FLAG_CLKDIV2 - ?
+
+    Note that modes marked with the INTERLACE or DBLSCAN flags will be
+    filtered out by drm_helper_probe_single_connector_modes() if the
+    connector's interlace_allowed or doublescan_allowed field is set to 0.
+
+  - name: Mode name
+
+    The driver must call drm_mode_set_name() to fill the mode name from the
+    hdisplay, vdisplay and interlace flag after filling the corresponding
+    fields.
+
+  The vrefresh value is computed by drm_helper_probe_single_connector_modes().
+
+  When parsing EDID data, drm_add_edid_modes() fill the connector display_info
+  width_mm and height_mm fields. When creating modes manually the .get_modes
+  helper operation must set the display_info width_mm and height_mm fields if
+  they haven't been set already (for instance at initilization time when a
+  fixed-size panel is attached to the connector). The mode width_mm and
+  height_mm fields are only used internally during EDID parsing and should not
+  be set when creating modes manually.
+
+  The helper function filters out modes larger than max_width and max_height
+  if specified. It then calls the connector .mode_valid helper operation for
+  each mode in the probed list to check whether the mode is valid for the
+  connector. The helper is mandatory and returns MODE_OK for supported modes
+  and one of the enum drm_mode_status values (MODE_*) for unsupported modes.
+  As unsupported modes will be immediately removed an implementation can
+  return MODE_BAD regardless of the exact reason why the mode is not valid.
+
+  Note that the .mode_valid helper operation is only called for modes detected
+  by the device, and *not* for modes set by the user through the CRTC
+  .set_config operation.
+
+- void (*destroy)(struct drm_connector *connector)
+
+  Destroy the connector when not needed anymore. See the KMS cleanup section.
+
+
+13. TODO
+--------
+
+- Document the struct_mutex catch-all lock
+- Document connector properties
+
+- crtc and encoder dpms helper operations are only mandatory if the disable
+  operation isn't provided.
+- crtc and connector .save and .restore operations are only used internally in
+  drivers, should they be removed from the core?
+- encoder mid-layer .save and .restore operations are only used internally in
+  drivers, should they be removed from the core?
+- encoder mid-layer .detect operation is only used internally in drivers,
+  should it be removed from the core?
+
+- KMS drivers must call drm_vblank_pre_modeset() and drm_vblank_post_modeset()
+  around mode setting. Should this be done in the DRM core?
+- vblank_disable_allowed is set to 1 in the first drm_vblank_post_modeset()
+  call and never set back to 0. It seems to be safe to permanently set it to 1
+  in drm_vblank_init() for KMS driver, and it might be safe for UMS drivers as
+  well. This should be investigated.
