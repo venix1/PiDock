@@ -1,0 +1,12 @@
+config DRM_PIDOCK
+        tristate "PiDock"
+        depends on DRM
+        select FB_SYS_FILLRECT
+        select FB_SYS_COPYAREA
+        select FB_SYS_IMAGEBLIT
+        select FB_DEFERRED_IO
+        select DRM_KMS_HELPER
+        select DRM_KMS_FB_HELPER
+        help
+          This is a KMS driver for the PiDock video adapter.
+          Say M/Y to add support for these devices via drm/kms interfaces.
