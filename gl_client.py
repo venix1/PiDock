@@ -56,8 +56,24 @@ class SDLRFBClient(rfb.rfbClient):
         rfb.rfbClient.__init__(self)
         sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO)
 
-        self.get_client(5, 3, 2)
+        mode = sdl2.SDL_DisplayMode
+        for i in range(sdl2.SDL_GetNumDisplayModes):
+            sdl2.SDL_GetDisplayMode(0, i, ctypes.byref(mode))
+            print(mode.w, mode.h)
+
+
+        # SDL_GetNumDisplayModes
+        # SDL_GetDisplayMode
+
+        self.get_client(8, 3, 4)
         self.set_listenPort(5400)
+
+        print('JPEG: ', self.enableJPEG)
+        self.enableJPEG = False
+        print('JPEG: ', self.enableJPEG)
+        # self.redShift = 11
+        # self.greenShift = 6
+        # self.blueShift = 1
 
         self.clock = time.time()
 
@@ -76,31 +92,29 @@ class SDLRFBClient(rfb.rfbClient):
 
     def malloc_framebuffer(self):
         print("Creating framebuffer")
+        print(self.width, self.height)
         width = self.width
         height = self.height
-        #depth = self.format.bitsPerPixel
-        depth = 32
+        depth = self.format.bitsPerPixel
+        self.pitch = width * ceil(depth/8)
+        assert depth == 32, 'Only 32bpp supported'
 
-        self.window = sdl2.SDL_CreateWindow(b"Hello World",
+        self.window = sdl2.SDL_CreateWindow(b"PiDock",
                               sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED,
                               width, height, sdl2.SDL_WINDOW_OPENGL)
-        assert self.window, "Window failed"
+        assert self.window, "Window failed: " + str(sdl2.SDL_GetError())
 
         self.glcontext = sdl2.SDL_GL_CreateContext(self.window)
 
         # mode = sdl2.SDL_DisplayMode()
         # sdl2.SDL_GetWindowDisplayMode(self.window, mode)
-        # mode.format = sdl2.SDL_PIXELFORMAT_BGR888
+        # mode.format = sdl2.SDL_PIXELFORMAT_RGBA5551
         # sdl2.SDL_SetWindowDisplayMode(self.window, mode)
     
-        #self.surface = sdl2.SDL_GetWindowSurface(self.window)
-        #self.surface = sdl2.SDL_CreateRGBSurface(0, 1920, 1080, 32, 0xff, 0xff00, 0xff0000, 0xff000000)
-        #self.surface = sdl2.SDL_CreateRGBSurface(0, 1920, 1080, 16, 0x1F, 0x3e0, 0x7C00, 0)
-        self.surface = sdl2.SDL_CreateRGBSurface(0, 1920, 1080, 16, 0, 0, 0, 0)
+        self.surface = sdl2.SDL_CreateRGBSurface(0, width, height, depth, 0, 0, 0, 0)
 
-        # TODO: Replace with memoryview support
         # So we just send the pointer address and hope it casts
-
+        # TODO: Replace with memoryview support
         self.set_framebuffer_from_ptr(self.surface.contents.pixels)
 
         self.texture = ctypes.c_uint(0)
@@ -118,10 +132,9 @@ class SDLRFBClient(rfb.rfbClient):
             gl.glGetShaderiv(shader, gl.GL_INFO_LOG_LENGTH, ctypes.byref(value))
             log = ctypes.create_string_buffer(value.value)
             length = ctypes.c_size_t(value.value)
-            print(log, ctypes.byref(log), ctypes.c_char_p(ctypes.addressof(log)))
-            gl.glGetProgramInfoLog(self.program, length, ctypes.byref(length), ctypes.c_char_p(ctypes.addressof(log)))
+            gl.glGetShaderInfoLog(shader, length, ctypes.byref(length), ctypes.c_char_p(ctypes.addressof(log)))
             print(log.raw)
-            raise Exception('Program linking failed')
+            raise Exception('Shader(vertex) compilation failed')
         gl.glAttachShader(self.program, shader)
 
         shader = gl.glCreateShader(gl.GL_FRAGMENT_SHADER)
@@ -134,9 +147,9 @@ class SDLRFBClient(rfb.rfbClient):
             log = ctypes.create_string_buffer(value.value)
             length = ctypes.c_size_t(value.value)
             print(log, ctypes.byref(log), ctypes.c_char_p(ctypes.addressof(log)))
-            gl.glGetProgramInfoLog(self.program, length, ctypes.byref(length), ctypes.c_char_p(ctypes.addressof(log)))
+            gl.glGetShaderInfoLog(shader, length, ctypes.byref(length), ctypes.c_char_p(ctypes.addressof(log)))
             print(log.raw)
-            raise Exception('Program linking failed')
+            raise Exception('Fragment shader compilation failed')
         gl.glAttachShader(self.program, shader)
 
         gl.glLinkProgram(self.program)
@@ -176,15 +189,10 @@ class SDLRFBClient(rfb.rfbClient):
 
         # Setup texture
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, self.width, self.height, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, 0)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR); 
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE);
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE);
-
-        # fp = open('/dev/fb0', 'r+b')
-        # self.fb = mmap.mmap(fp.fileno(), 1920*1080*2)
-        # fb_ptr = memoryview(self.fb)
-        # self.set_framebuffer_from_ptr(fb_ptr)
-
 
         # Make sure VNC and SDL match formatting
         # client->format.bitsPerPixel=depth;
@@ -196,29 +204,34 @@ class SDLRFBClient(rfb.rfbClient):
         # client->format.blueMax=sdl->format->Bmask>>client->format.blueShift;
         # self.SetFormatAndEncodings(client);
 
+        self.clock = time.time()
+
         return True
 
     def got_framebuffer_update(self, x, y, width, height):
         # print('got_framebuffer_update: %d %d %d %d' % (x,y,width,height))
-        if not self.clock:
-            self.clock = time.time()
 
-        # gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
-        # gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, x, y, width, height, gl.GL_RGBA,
-        #     gl.GL_UNSIGNED_BYTE, self.surface.contents.pixels)
-        # gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        for line in range(height):
+            offset = self.surface.contents.pixels + (line*self.pitch)+x
+            gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, x, y, width, 1, 
+                gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, self.surface.contents.pixels)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
     def finished_framebuffer_update(self):
         clock = time.time()
-        # gl.glClearColor(1,1,1,1)
-        # gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        # pixels = ctypes.cast(self.surface.contents.pixels, ctypes.POINTER(ctypes.c_short))
+        # print('{:016b}'.format(1)) 
+        # for i in range(16):
+        #     print('{0}: {1:016b}'.format(i, pixels[i])) 
+        
+        # Use incremental update in got_framebuffer_update
+        # gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
         # gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, self.width, self.height, 0, gl.GL_RGBA,
         #     gl.GL_UNSIGNED_BYTE, self.surface.contents.pixels)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, self.width, self.height, 0, gl.GL_RGBA,
-            gl.GL_UNSIGNED_SHORT_5_5_5_1, self.surface.contents.pixels)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+
+        # gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
         gl.glValidateProgram(self.program)
         gl.glUseProgram(self.program);
@@ -242,9 +255,13 @@ class SDLRFBClient(rfb.rfbClient):
         gl.glUseProgram(0); 
 
         sdl2.SDL_GL_SwapWindow(self.window)
-        print('Frame: ' + str(time.time() - clock))
-        print('Overhead: ' + str(time.time() - self.clock))
-        self.clock = None
+
+        from math import ceil
+        diff = time.time() - clock
+        print('Frame: {:.0f}ms'.format(ceil(diff*1000)))
+        print('Overhead: {:.0f}ms'.format(ceil((time.time() - self.clock - diff)*1000)))
+        print('FPS: {:.0f}'.format(1/(time.time() - self.clock)))
+        self.clock = time.time()
 
 class Sink(pyzre.ZRE):
     def __init__(self, loop):
@@ -282,6 +299,7 @@ class Sink(pyzre.ZRE):
         else:        
             raise Exception('Unhandled msg:' + str(msg))
 
+# TODO. Check SDL_GetNumVideoDisplays and create an instance for each
 instance = Sink(asyncio.get_event_loop())
 
 # def event_loop():
