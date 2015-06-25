@@ -23,6 +23,7 @@ cdef registerClient(rfbClient client):
     client._rfbClient.canHandleNewFBSize = True
     client._rfbClient.MallocFrameBuffer      = MallocFrameBuffer
     client._rfbClient.GotFrameBufferUpdate   = GotFrameBufferUpdate
+    client._rfbClient.FinishedFrameBufferUpdate = FinishedFrameBufferUpdate
     client._rfbClient.HandleKeyboardLedState = HandleKeyboardLedState;
     client._rfbClient.HandleTextChat         = HandleTextChat;
     client._rfbClient.GotXCutText            = GotXCutText;
@@ -46,6 +47,10 @@ cdef crfb.rfbBool MallocFrameBuffer(crfb.rfbClient* client):
 cdef void GotFrameBufferUpdate(crfb.rfbClient* client, int x, int y, int w, int h):
     self = getClientObject(<size_t>client)
     self.got_framebuffer_update(x, y, w, h)
+
+cdef void FinishedFrameBufferUpdate(crfb.rfbClient* client):
+    self = getClientObject(<size_t>client)
+    self.finished_framebuffer_update()
 
 cdef void HandleKeyboardLedState(crfb.rfbClient* client, int value, int pad):
     print 'callback, keyboard'
@@ -76,18 +81,88 @@ cdef class rfbClient:
         #if not crfb.rfbInitClient(self._rfbClient, &argc, &argv):
         #    raise Exception('unable to init client')
 
-    @property
-    def height(self):
-        return self._rfbClient.height
-    @property
-    def width(self):
-        return self._rfbClient.width
+    property height:
+        def __get__(self):
+            return self._rfbClient.height
 
-    @property
-    def framebuffer(self):
-        pass #return self._framebuffer
+    property width:
+        def __get__(self):
+            return self._rfbClient.width
 
-    def set_framebuffer_from_ptr(self, size_t ptr):
+    property encodingsString:
+        def __get__(self):
+            return self._rfbClient.appData.encodingsString
+
+        def __set__(self, value):
+            self._appData_encodingsString = value
+            self._rfbClient.appData.encodingsString = value
+
+    property compressLevel:
+        def __get__(self):
+            return self._rfbClient.appData.compressLevel
+
+        def __set__(self, value):
+            self._rfbClient.appData.compressLevel = value
+
+    property qualityLevel:
+        def __get__(self):
+            return self._rfbClient.appData.qualityLevel
+
+        def __set__(self, value):
+            self._rfbClient.appData.qualityLevel = value
+
+    property useRemoteCursor:
+        def __get__(self):
+            return self._rfbClient.appData.useRemoteCursor
+
+        def __set__(self, value):
+            self._rfbClient.appData.useRemoteCursor = value
+
+    property redShift:
+        def __get__(self):
+            assert self._rfbClient, 'rfbClient not initialized'
+            return self._rfbClient.format.redShift
+
+        def __set__(self, value):
+            assert self._rfbClient, 'rfbClient not initialized'
+            self._rfbClient.format.redShift = value
+            
+
+    property greenShift:
+        def __get__(self):
+            assert self._rfbClient, 'rfbClient not initialized'
+            return self._rfbClient.format.greenShift
+
+        def __set__(self, value):
+            assert self._rfbClient, 'rfbClient not initialized'
+            self._rfbClient.format.greenShift = value
+
+    property blueShift:
+        def __get__(self):
+            assert self._rfbClient, 'rfbClient not initialized'
+            return self._rfbClient.format.blueShift
+
+        def __set__(self, value):
+            assert self._rfbClient, 'rfbClient not initialized'
+            self._rfbClient.format.blueShift = value
+
+    property enableJPEG:
+        def __get__(self):
+            assert self._rfbClient, 'rfbClient not initialized'
+            return self._rfbClient.appData.enableJPEG
+
+        def __set__(self, value):
+            assert self._rfbClient, 'rfbClient not initialized'
+            self._rfbClient.appData.enableJPEG = value
+
+    property framebuffer:
+        def __get__(self):
+            pass #return self._framebuffer
+
+        def __set__(self, unsigned char[:] data):
+            self._rfbClient.frameBuffer = &data[0]
+
+    def set_framebuffer_from_ptr(self, size_t value):
         cdef void* ptr = <void*>value
         self._rfbClient.frameBuffer = <unsigned char*>ptr
 
@@ -228,3 +303,31 @@ cdef class rfbServer:
 
     def runEventLoop(self):
         crfb.rfbRunEventLoop(self._rfbScreen, 4000, False)
+
+    property redShift:
+        def __get__(self):
+            assert self._rfbScreen, 'rfbClient not initialized'
+            return self._rfbScreen.serverFormat.redShift
+
+        def __set__(self, value):
+            assert self._rfbScreen, 'rfbClient not initialized'
+            self._rfbScreen.serverFormat.redShift = value
+            
+
+    property greenShift:
+        def __get__(self):
+            assert self._rfbScreen, 'rfbClient not initialized'
+            return self._rfbScreen.serverFormat.greenShift
+
+        def __set__(self, value):
+            assert self._rfbScreen, 'rfbClient not initialized'
+            self._rfbScreen.serverFormat.greenShift = value
+
+    property blueShift:
+        def __get__(self):
+            assert self._rfbScreen, 'rfbClient not initialized'
+            return self._rfbScreen.serverFormat.blueShift
+
+        def __set__(self, value):
+            assert self._rfbScreen, 'rfbClient not initialized'
+            self._rfbScreen.serverFormat.blueShift = value

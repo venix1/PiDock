@@ -1,23 +1,46 @@
 # file: crfb.pxd
+from libc.stdint cimport uint8_t, uint16_t
 
 ctypedef bint rfbBool
 ctypedef unsigned int  rfbPixel
+
 cdef extern from "rfb/rfbclient.h":
     ctypedef _rfbClient rfbClient
     ctypedef _rfbClient* rfbClientPtr
 
     ctypedef rfbBool(*MallocFrameBufferProc)(rfbClient *client);
     ctypedef void(*GotFrameBufferUpdateProc)(rfbClient *client, int x, int y, int w, int h)
+    ctypedef void(*FinishedFrameBufferUpdateProc)(rfbClient *client)
     ctypedef void(*HandleKeyboardLedStateProc)(rfbClient* client, int value, int pad)
     ctypedef void(*HandleTextChatProc)(rfbClient* client, int value, char *text)
     ctypedef void(*GotXCutTextProc)(rfbClient* client, const char *text, int textlen)
 
-    cdef struct rfbPixelFormat:
-        pass
+    ctypedef struct rfbPixelFormat:
+        uint8_t  bitsPerPixel;
+        uint8_t  depth;
+        uint8_t  bigEndian;
+        uint8_t  trueColour;
+        uint16_t redMax;
+        uint16_t greenMax;
+        uint16_t blueMax;
+        uint8_t  redShift;
+        uint8_t  greenShift;
+        uint8_t  blueShift;
+
+    ctypedef struct AppData:
+        char    *encodingsString;
+        int     compressLevel;
+        int     qualityLevel;
+        rfbBool enableJPEG;
+        rfbBool useRemoteCursor;
+        int     scaleSetting;
 
     cdef struct _rfbClient:
+        AppData appData;
+
         rfbBool canHandleNewFBSize;
         GotFrameBufferUpdateProc GotFrameBufferUpdate;
+        FinishedFrameBufferUpdateProc FinishedFrameBufferUpdate;
         MallocFrameBufferProc MallocFrameBuffer;
         HandleKeyboardLedStateProc HandleKeyboardLedState;
         HandleTextChatProc HandleTextChat;
@@ -68,6 +91,7 @@ cdef extern from "rfb/rfb.h":
         rfbBool alwaysShared;
         rfbClientPtr clientHead;
         rfbClientPtr pointerClient;  
+        rfbPixelFormat serverFormat;
 
     cdef struct _rfbClientRec:
         pass
