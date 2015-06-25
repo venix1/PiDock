@@ -128,15 +128,10 @@ static int pidock_crtc_mode_set(struct drm_crtc *crtc,
 	pfb->active = true;
 
 	/* damage all of it */
-	pidock_handle_damage(pfb, 0, 0, pfb->base.width, pfb->base.height);
+	pidock_nl_handle_damage(pfb, 0, 0, pfb->base.width, pfb->base.height);
 	return 0;
 }
 
-static void pidock_crtc_enable(struct drm_crtc *crtc)
-{
-	DRM_INFO("pidock_crtc_enable:");
-	pidock_crtc_dpms(crtc, DRM_MODE_DPMS_ON);
-}
 
 static void pidock_crtc_disable(struct drm_crtc *crtc)
 {
@@ -173,7 +168,6 @@ static struct drm_crtc_helper_funcs pidock_helper_funcs = {
 	.prepare = pidock_crtc_prepare,
 	.commit = pidock_crtc_commit,
 	.disable = pidock_crtc_disable,
-	.enable  = pidock_crtc_enable,
 };
 
 static void pidock_crtc_destroy(struct drm_crtc *crtc)

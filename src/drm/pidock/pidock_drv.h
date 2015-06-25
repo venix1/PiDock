@@ -30,10 +30,16 @@
 #define to_pidock_bo(x) container_of(x, struct pidock_gem_object, base)
 #define to_pidock_fb(x) container_of(x, struct pidock_framebuffer, base)
 
+extern struct device pidock_bus;
+
+
 struct pidock_gem_object {
 	struct drm_gem_object base;
 	struct page **pages;
 	void *vmapping;
+    bool use_dma_buf;
+
+	/* Needed ? */
 	struct sg_table *sg;
 	unsigned int flags;
 };
@@ -41,6 +47,7 @@ struct pidock_gem_object {
 struct pidock_framebuffer {
 	struct drm_framebuffer base;
 	struct pidock_gem_object *obj;
+
 	bool active; 
 	int x1, y1, x2, y2; /* dirty rect */
 	spinlock_t dirty_lock;
@@ -49,10 +56,13 @@ struct pidock_framebuffer {
 struct pidock_device {
 	struct device *dev;
 	struct drm_device *ddev;
+	struct sock *nl_sk;
 
 	struct pidock_fbdev *fbdev;
 	char mode_buf[1024];
 	uint32_t mode_buf_len;
+
+	uint32_t gnl_seq;
 };
 
 int pidock_driver_unload(struct drm_device *dev);
@@ -64,9 +74,6 @@ struct drm_encoder *pidock_encoder_init(struct drm_device *dev);
 
 int pidock_fbdev_init(struct drm_device *dev);
 void pidock_fbdev_cleanup(struct drm_device *dev);
-int pidock_handle_damage(struct pidock_framebuffer *fb, 
-	int x, int y,
-	int width, int height);
 struct drm_framebuffer *
 pidock_fb_user_fb_create(struct drm_device *dev,
 	struct drm_file *file,
@@ -100,6 +107,18 @@ struct drm_gem_object *pidock_gem_prime_import(struct drm_device *dev,
 
 int pidock_modeset_init(struct drm_device *dev);
 void pidock_modeset_cleanup(struct drm_device *dev);
+
+int pidock_nl_init(struct pidock_device *pidock);
+void pidock_nl_cleanup(struct pidock_device *pidock);
+int pidock_nl_handle_damage(
+	struct pidock_framebuffer *pfb,
+	int x, int y,
+	int w, int h);
+
+int pidock_bus_init(void);
+void pidock_bus_cleanup(void);
+
+
 
 
 

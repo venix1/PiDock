@@ -21,7 +21,6 @@
 int pidock_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct pidock_device *pidock;
-	struct drm_vblank_crtc *vblank;
 	int ret = -ENOMEM;
 
 	DRM_DEBUG("\n");
@@ -44,11 +43,12 @@ int pidock_driver_load(struct drm_device *dev, unsigned long flags)
 	ret = drm_vblank_init(dev, 1);
 	if (ret)
 		goto err_fb;
-	vblank = &dev->vblank[0];
-	DRM_INFO("vblank %d", vblank->enabled);
+
+	ret = pidock_nl_init(pidock);
+	if (ret)
+		goto err_fb;
 
 	return 0;
-
 err_fb:
 	pidock_fbdev_cleanup(dev);
 err:
@@ -60,12 +60,10 @@ err:
 int pidock_driver_unload(struct drm_device *dev)
 {
 	struct pidock_device *pidock = dev->dev_private;
-	struct drm_vblank_crtc *vblank;
 
 	DRM_INFO("pidock_driver_unload:");
-	vblank = &dev->vblank[0];
-	DRM_INFO("vblank %d", vblank->enabled);
 
+	pidock_nl_cleanup(pidock);
 	drm_vblank_cleanup(dev);
 	pidock_fbdev_cleanup(dev);
 	pidock_modeset_cleanup(dev);

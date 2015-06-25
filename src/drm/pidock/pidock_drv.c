@@ -46,7 +46,7 @@ static const struct vm_operations_struct pidock_gem_vm_ops = {
 static const struct file_operations pidock_driver_fops = {
 	.owner = THIS_MODULE,
 	.open = drm_open,
-	.mmap = pidock_drm_gem_mmap,
+	.mmap = drm_gem_mmap,
 	.poll = drm_poll,
 	.read = drm_read,
 	.unlocked_ioctl = drm_ioctl,
@@ -76,10 +76,10 @@ static struct drm_driver driver = {
 
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
-	.gem_prime_import = drm_gem_prime_import,
-	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
+	//.gem_prime_import = drm_gem_prime_import,
+	//.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
 	//.gem_prime_export = pidock_gem_prime_export,
-	//.gem_prime_import = pidock_gem_prime_import,
+	.gem_prime_import = pidock_gem_prime_import,
 
 	.dumb_create = pidock_dumb_create,
 	.dumb_map_offset = pidock_gem_mmap,
@@ -98,36 +98,44 @@ static int __init pidock_init(void)
 {
 	struct drm_device *dev;
 	int err;
-	DRM_INFO("pidock_init:");
+    printk(KERN_INFO "pidock_init:");
 
-	dev = drm_dev_alloc(&driver, NULL);
+	err = pidock_bus_init();
+	if (err)
+		return err;
+
+	dev = drm_dev_alloc(&driver, &pidock_bus);
 	if (!dev)
 		return -ENOMEM;
 
 	err = drm_dev_register(dev, 0);
 	if (err)
 		goto err_free;
-	
+
 	DRM_INFO("Initialized pidock on minor %d\n", dev->primary->index);
 
 	pidock_drm = dev;
 	return 0;
 
 err_free:
+	printk(KERN_ERR "pidock_init failed");
 	drm_dev_unref(dev);
+	pidock_bus_cleanup();
 	return err;
 }
 
 static void __exit pidock_exit(void)
 {
 	struct drm_device *dev = pidock_drm;
-	
+
 	DRM_INFO("pidock_exit: %p", pidock_drm);
 	if (dev) {
 		pidock_drm = NULL;
 	    drm_dev_unregister(dev);
 		drm_dev_unref(dev);
 	}
+
+	pidock_bus_cleanup();
 }
 
 module_init(pidock_init);

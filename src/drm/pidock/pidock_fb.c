@@ -37,18 +37,6 @@ struct pidock_fbdev {
 	int fb_count;
 };
 
-int pidock_handle_damage(
-	struct pidock_framebuffer *fb, 
-	int x, int y,
-	int width, int height)
-{
-	/* transfer damage information to userland */
-	/* stub */
-	DRM_INFO("pidock_handle_damage: stub");
-
-	return 0;
-}
-
 static int pidock_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	unsigned long start = vma->vm_start;
@@ -58,12 +46,13 @@ static int pidock_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 
 	DRM_INFO("pidock_fb_mmap:");
 
+	DRM_INFO("%d + %d > %d", offset, size, info->fix.smem_len);
 	if (offset + size > info->fix.smem_len)
 		return -EINVAL;
 
 	pos = (unsigned long)info->fix.smem_start + offset;
 
-	pr_notice("mmap() framebuffer addr:%lu size:%lu\n",
+	DRM_INFO("mmap() framebuffer addr:%lu size:%lu\n",
 		pos, size);
 
 	while (size > 0) {
@@ -88,7 +77,7 @@ static void pidock_fb_fillrect(struct fb_info *info, const struct fb_fillrect *r
 
 	sys_fillrect(info, rect);
 
-	pidock_handle_damage(&pfbdev->pfb, 
+	pidock_nl_handle_damage(&pfbdev->pfb,
 		rect->dx, rect->dy, 
 		rect->width, rect->height);
 }
@@ -99,7 +88,7 @@ static void pidock_fb_copyarea(struct fb_info *info, const struct fb_copyarea *r
 
 	sys_copyarea(info, region);
 
-	pidock_handle_damage(&pfbdev->pfb, 
+	pidock_nl_handle_damage(&pfbdev->pfb,
 		region->dx, region->dy, 
 		region->width, region->height);
 }
@@ -110,7 +99,7 @@ static void pidock_fb_imageblit(struct fb_info *info, const struct fb_image *ima
 
 	sys_imageblit(info, image);
 
-	pidock_handle_damage(&pfbdev->pfb, 
+	pidock_nl_handle_damage(&pfbdev->pfb,
 		image->dx, image->dy, 
 		image->width, image->height);
 }
@@ -276,7 +265,7 @@ static int pidock_user_framebuffer_dirty(
 	struct pidock_framebuffer *pfb = to_pidock_fb(fb);
 	int i;
 	int ret = 0;
-	DRM_INFO("pidock_user_framebuffer_dirty:");
+	DRM_INFO("pidock_user_framebuffer_dirty: pfb:%p", pfb);
 
 	drm_modeset_lock_all(fb->dev);
 
@@ -284,9 +273,14 @@ static int pidock_user_framebuffer_dirty(
 		goto unlock;
 
 	for (i = 0; i < num_clips; i++) {
-		ret = pidock_handle_damage(pfb, clips[i].x1, clips[i].y1,
-		clips[i].x2 - clips[i].x1,
-		clips[i].y2 - clips[i].y1);
+		DRM_INFO("    pidock_user_framebuffer_dirty: (%d, %d) - (%d, %d)",
+			clips[i].x1, clips[i].y1,
+			clips[i].x2, clips[i].y2);
+			//pidock_nl_handle_damage(pfb, 0, 0, pfb->base.width, pfb->base.height);
+		ret = pidock_nl_handle_damage(pfb,
+				clips[i].x1, clips[i].y1,
+				clips[i].x2 - clips[i].x1,
+				clips[i].y2 - clips[i].y1);
 		if (ret)
 			break;
 	}
@@ -302,7 +296,7 @@ static void pidock_user_framebuffer_destroy(struct drm_framebuffer *fb)
 {
 	struct pidock_framebuffer *pfb = to_pidock_fb(fb);
 
-	DRM_INFO("pidock_user_framebuffer_destroy:");
+	DRM_INFO("pidock_user_framebuffer_destroy: pfb:%p", pfb);
 
 	if (pfb->obj)
 		drm_gem_object_unreference_unlocked(&pfb->obj->base);
@@ -330,7 +324,7 @@ pidock_framebuffer_init(
 	pfb->obj = obj;
 	drm_helper_mode_fill_fb_struct(&pfb->base, mode_cmd);
 	ret = drm_framebuffer_init(dev, &pfb->base, &pidockfb_funcs);
-	DRM_INFO("pidock_framebuffer_init: %d %p", ret, pfb->base.funcs->dirty);
+	DRM_INFO("    pfb:%p", pfb);
 	return ret;
 }
 
@@ -507,7 +501,7 @@ pidock_fb_user_fb_create(struct drm_device *dev,
 	int ret;
 	uint32_t size;
 
-	DRM_INFO("pidock_fb_user_fb_create: %dx%d", mode_cmd->pitches[0], mode_cmd->height);
+	DRM_INFO("pidock_fb_user_fb_create: %.4s %d %d", (char *)&mode_cmd->pixel_format, mode_cmd->pitches[0], mode_cmd->height);
 
 	obj = drm_gem_object_lookup(dev, file, mode_cmd->handles[0]);
 	if (obj == NULL)
