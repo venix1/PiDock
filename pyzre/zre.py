@@ -124,6 +124,33 @@ class HelloMsg(object):
 
         return cls(nonce, ip, mailbox, groups, status, headers)
 
+class WhisperMsg(object):
+    """
+    ; Send a message to a peer
+    S:WHISPER       = signature %x02 sequence content
+    content         = FRAME         ; Message content as 0MQ frame
+    """
+    def __init__(self, nonce, content):
+        self.nonce = nonce
+        self.content = content
+
+    @classmethod
+    def pack(cls, nonce, msg):
+        payload =  struct.pack('3B',   0xAA, 0xA1, 0x02)
+        payload += struct.pack('B', nonce)
+
+        return [payload, msg]
+
+    @classmethod
+    def unpack(cls, payload):
+
+        assert payload[:3] == b'\xaa\xa1\x02', payload
+        payload = bytearray(payload[3:])
+
+        nonce = get_data('B', payload)
+
+        return cls(nonce, bytes(payload))
+
 class ZREPeer(object):
     def __init__(self, uuid, addr, identity):
         self.uuid = uuid
@@ -142,7 +169,7 @@ class ZREPeer(object):
 
 
 class ZRE(object):
-    def __init__(self, transmit=True, recieve=True, _uuid=None):
+    def __init__(self, flags=0, _uuid=None, loop=None):
         self.peers = {} 
         self.groups = []
         self.status = 0
@@ -152,14 +179,15 @@ class ZRE(object):
         if not _uuid:
             self.uuid = uuid.uuid4()
 
-        ctx = zmq.Context.instance()
+        self.listen()
 
+    def listen(self):
         # Bind Router
+        ctx = zmq.Context.instance()
         self.router = ctx.socket(zmq.ROUTER)
         self.mailbox = self.router.bind_to_random_port('tcp://*')
         print(self.uuid, self.mailbox)
 
-        
         # Bind Beacon
         self.beacon = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.beacon.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -174,15 +202,24 @@ class ZRE(object):
         # setup asyncio handlers
         loop = asyncio.get_event_loop()
         loop.add_reader(self.beacon, self.beacon_handler, self.beacon)
-        loop.call_later(1, self.broadcast)
-        self.router_handler()
         loop.create_task(self.router_handler())
+
+        # Get IP address if not configured.
+        if not self.ip:
+            self.broadcast()
+
+    def broadcast(self):
+        # configure beacon timer
+        loop = asyncio.get_event_loop()
+        loop.call_later(1, self.broadcast)
 
     def add_peer(self, uuid, addr):
         peer = ZREPeer(uuid, addr, self.uuid)
         self.peers[uuid.int] = peer
 
         self.hello(peer)
+
+        return peer
 
     @asyncio.coroutine
     def router_handler(self):
@@ -192,13 +229,32 @@ class ZRE(object):
                 msg = self.router.recv_multipart()
                 identity = uuid.UUID(bytes=msg[0])
                 peer = self.peers.get(identity.int, None)
+
                 # S:HELLO
                 if msg[1][:3] == b'\xaa\xa1\x01':
                     msg = HelloMsg.unpack(msg[1])
 
                     if not peer:
-                        self.add_peer(identity, (msg.ip.decode('utf-8'), msg.mailbox))
+                        # If we don't know our IP, wait for a beacon
+                        # Seeing as we got a connection, the beacon
+                        # should provide it. This could be spoofed.
+                        for attempts in range(10):
+                            if not self.ip:
+                                yield from asyncio.sleep(0.2)
+                            else:
+                                break
+
+                        assert self.ip, 'icanhazip?'
+                        peer = self.add_peer(identity, (msg.ip.decode('utf-8'), msg.mailbox))
                     print('S:HELLO')
+                    self.on_hello(peer, msg)
+
+                # S:WHISPER
+                elif msg[1][:3] == b'\xaa\xa1\x02':
+                    msg = WhisperMsg.unpack(msg[1] + msg[2])
+                    print('S:WHISPER', msg.content)
+                    self.on_whisper(peer, msg)
+
                 else:
                     print('Unknown:', msg)
 
@@ -243,14 +299,10 @@ class ZRE(object):
         msg = HelloMsg.pack(peer.nonce, self.ip, self.mailbox, self.groups, self.status, self.headers)
         peer.socket.send(msg)
 
-    def whisper(self):
-        """
-        ; Send a message to a peer
-        S:WHISPER       = signature %x02 sequence content
-        content         = FRAME         ; Message content as 0MQ frame
-        """
-        pass
-    
+    def whisper(self, peer, msg):
+        payload = WhisperMsg.pack(peer.nonce, msg)
+        peer.socket.send_multipart(payload)
+
     def shout(self):
         """
         ; Send a message to a group
