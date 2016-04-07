@@ -28,6 +28,7 @@ struct pidock_gem_object *pidock_gem_alloc_object(struct drm_device *dev,
 	if (obj == NULL)
 		return NULL;
 
+	size = roundup(size, PAGE_SIZE);
 	if (drm_gem_object_init(dev, &obj->base, size) != 0) {
 		kfree(obj);
 		return NULL;
@@ -48,7 +49,6 @@ pidock_gem_create(struct drm_file *file,
 	u32 handle;
 	DRM_INFO("pidock_gem_create:");
 
-	size = roundup(size, PAGE_SIZE);
 
 	obj = pidock_gem_alloc_object(dev, size);
 	if (obj == NULL)
@@ -56,12 +56,13 @@ pidock_gem_create(struct drm_file *file,
 
 	ret = drm_gem_handle_create(file, &obj->base, &handle);
 	if (ret) {
+ 		DRM_INFO("drm_gem_Handle_create: %d", ret);
 		drm_gem_object_release(&obj->base);
 		kfree(obj);
 		return ret;
 	}
 
-	drm_gem_object_unreference(&obj->base);
+	drm_gem_object_unreference_unlocked(&obj->base);
 	*handle_p = handle;
 	return 0;
 }
@@ -111,18 +112,24 @@ int pidock_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	struct pidock_gem_object *obj = to_pidock_bo(vma->vm_private_data);
 	struct page *page;
-	unsigned int page_offset;
+	unsigned int page_offset, num_pages;
 	int ret = 0;
 	DRM_INFO("pidock_gem_fault:");
+
+    vma->vm_flags |= VM_MIXEDMAP;
 
 	page_offset = ((unsigned long)vmf->virtual_address - vma->vm_start) >>
 		PAGE_SHIFT;
 
-	if (!obj->pages)
+    num_pages = DIV_ROUND_UP(obj->base.size, PAGE_SIZE);
+
+	if (!obj->pages || page_offset > num_pages)
 		return VM_FAULT_SIGBUS;
 
 	page = obj->pages[page_offset];
+
 	ret = vm_insert_page(vma, (unsigned long)vmf->virtual_address, page);
+	DRM_INFO("pidock_gem_fault: 4");
 	switch (ret) {
 		case -EAGAIN:
 		case 0:
@@ -180,10 +187,10 @@ int pidock_gem_vmap(struct pidock_gem_object *obj)
 	}
 
 	ret = pidock_gem_get_pages(obj);
-	if (ret) {
-		DRM_INFO("pidock_gem_vmap: get_pages failed %d", ret);
-		return ret;
-	}
+    if (ret) {
+        DRM_INFO("pidock_gem_vamp: get_pages failed %d", ret);
+        return ret;
+    }
 
 	obj->vmapping = vmap(obj->pages, page_count, 0, PAGE_KERNEL);
 	if (!obj->vmapping)
@@ -238,11 +245,16 @@ int pidock_gem_mmap(struct drm_file *file, struct drm_device *dev,
 		ret = -ENOENT;
 		goto unlock;
 	}
-	gobj = to_pidock_bo(obj);
 
+    // if (obj->map_list.map)
+    //     goto out;
+
+	gobj = to_pidock_bo(obj);
 	ret = pidock_gem_get_pages(gobj);
 	if (ret)
 		goto out;
+
+
 	ret = drm_gem_create_mmap_offset(obj);
 	if (ret)
 		goto out;
