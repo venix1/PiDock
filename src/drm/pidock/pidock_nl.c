@@ -13,7 +13,7 @@
 
 #include "pidock_drv.h"
 
-#define PIDOCK_MSG_SIZE ((PAGE_SIZE*15)-GENL_HDRLEN)
+#define PIDOCK_MSG_SIZE (PAGE_SIZE-GENL_HDRLEN)
 
 struct rect{
 	unsigned int x;
@@ -33,17 +33,19 @@ void rect_set(struct rect* rect, int x, int y, int width, int height)
 
 enum {
 	PIDOCK_A_UNSPEC,
-	PIDOCK_A_TILE_PITCH,
 	PIDOCK_A_TILE_RECT,
 	PIDOCK_A_TILE_DATA,
+	PIDOCK_A_OUTPUT_ID,
+    PIDOCK_A_FB_ID,
 	__PIDOCK_A_MAX,
 };
 
 #define PIDOCK_A_MAX (__PIDOCK_A_MAX - 1)
 
 static struct nla_policy pidock_genl_policy[PIDOCK_A_MAX + 1] = {
+	[PIDOCK_A_OUTPUT_ID] = { .type = NLA_U32 },
 	[PIDOCK_A_TILE_RECT] = { .len = sizeof(struct rect) },
-	[PIDOCK_A_TILE_DATA] = { .type = NLA_BINARY, .len = PIDOCK_MSG_SIZE },
+    [PIDOCK_A_TILE_DATA] = { .type = NLA_BINARY, .len = PIDOCK_MSG_SIZE },
 };
 
 static struct genl_family pidock_gnl_family = {
@@ -54,15 +56,127 @@ static struct genl_family pidock_gnl_family = {
 	.maxattr = PIDOCK_A_MAX,
 };
 
+
 /* Send entire framebuffer */
+/* obsolete by mmap buffer. */
 static int pidock_fb_refresh(struct sk_buff *skb, struct genl_info *info)
 {
+	/*
+    struct nlattr *tb[PIDOCK_A_MAX+1];
+    struct nlmsghdr *nlh = nlmsg_hdr(skb);
+	int err;
+	*/
+
+	DRM_INFO("pidock_nl_fb_refresh: ");
+	// err = nlmsg_parse(nlh, 0, tb, PIDOCK_A_MAX, pidock_genl_policy);
+
+	return 0;
+}
+
+/* Dynamically add connector. */
+// pidock_gnl_doit_addconn
+static int pidock_doit_getfb(struct sk_buff *skb, struct genl_info *info)
+{
+	struct sk_buff *msg;
+	void *reply;
+	// struct nlattr  *nla;
+	int id;
+
+	if (info->attrs[PIDOCK_A_OUTPUT_ID] == NULL) {
+		DRM_INFO("pidock_nl_connector_add: no ID");
+		// err invalid msg
+		return -1;
+	}
+
+	id = nla_get_u32(info->attrs[PIDOCK_A_OUTPUT_ID]);
+	DRM_INFO("pidock_gnl_doit_getfb: %d", id);
+
+    if (pidock_dev->output[id] == NULL)
+        return 0;
+
+	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+	if (!msg)
+		return -ENOMEM;
+
+	reply = genlmsg_put_reply(msg, info, &pidock_gnl_family, 0, info->genlhdr->cmd);
+	nla_put_u32(msg, PIDOCK_A_OUTPUT_ID, id);
+
+    if (pidock_dev->output[id]->crtc->primary->fb) {
+	    nla_put_u32(msg, PIDOCK_A_FB_ID,
+                    pidock_dev->output[id]->crtc->primary->fb->base.id);
+/*
+if (fb->funcs->create_handle) {
+if (file_priv->is_master || capable(CAP_SYS_ADMIN) ||
+drm_is_control_client(file_priv)) {
+ret = fb->funcs->create_handle(fb, file_priv,
+&r->handle);
+}
+}
+	    nla_put_u32(skb, PIDOCK_A_FB_HANDLE, pfb->base.base.id);
+*/
+    }
+    else {
+        DRM_INFO("no primary fb");
+	    nla_put_u32(msg, PIDOCK_A_FB_ID, 0);
+    }
+
+	genlmsg_end(msg, reply);
+	return genlmsg_reply(msg, info);
+}
+static int pidock_connector_add(struct sk_buff *skb, struct genl_info *info)
+{
+	struct sk_buff *msg;
+	void *reply;
+	// struct nlattr  *nla;
+	int id;
+
+	if (info->attrs[PIDOCK_A_OUTPUT_ID] == NULL) {
+		DRM_INFO("P: %p", info->attrs[0]);
+		DRM_INFO("P: %p", info->attrs[1]);
+		DRM_INFO("P: %p", info->attrs[2]);
+		DRM_INFO("P: %p", info->attrs[PIDOCK_A_OUTPUT_ID]);
+		DRM_INFO("P: %d", PIDOCK_A_OUTPUT_ID);
+		DRM_INFO("pidock_nl_connector_add: no ID");
+		// err invalid msg
+		return -1;
+	}
+
+	id = nla_get_u32(info->attrs[PIDOCK_A_OUTPUT_ID]);
+	DRM_INFO("pidock_nl_connector_add: %d", id);
+
+	id = pidock_output_init(pidock_dev->ddev);
+	if (id < 0)
+		return id;
+
+	msg = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
+	if (!msg)
+		return -ENOMEM;
+
+	reply = genlmsg_put_reply(msg, info, &pidock_gnl_family, 0, info->genlhdr->cmd);
+	nla_put_u32(msg, PIDOCK_A_OUTPUT_ID, id);
+
+
+	nla_put_u32(msg, PIDOCK_A_FB_ID,
+                pidock_dev->output[id]->crtc->primary->fb->base.id);
+
+	genlmsg_end(msg, reply);
+	return genlmsg_reply(msg, info);
+}
+
+/* Dynamically remove connector. */
+static int pidock_connector_remove(struct sk_buff *skb, struct genl_info *info)
+{
+	DRM_INFO("pidock_nl_connector_remove: ");
+    /* Userspace should send 32-bit identifier. */
 	return 0;
 }
 
 enum {
 	PIDOCK_C_FB_DIRTY,
 	PIDOCK_C_FB_REFRESH,
+	PIDOCK_C_CONNECTOR_ADD,
+	PIDOCK_C_CONNECTOR_REMOVE,
+    PIDOCK_C_GET_FB,
 	__PIDOCK_C_MAX,
 };
 
@@ -74,6 +188,28 @@ static struct genl_ops pidock_gnl_ops[] = {
 		.doit = pidock_fb_refresh,
 		.dumpit = NULL,
 	},
+	{
+		.cmd = PIDOCK_C_CONNECTOR_ADD,
+		.flags = 0,
+		.policy = pidock_genl_policy,
+		.doit = pidock_connector_add,
+		.dumpit = NULL,
+    },
+	{
+		.cmd = PIDOCK_C_CONNECTOR_REMOVE,
+		.flags = 0,
+		.policy = pidock_genl_policy,
+		.doit = pidock_connector_remove,
+		.dumpit = NULL,
+    },
+    {
+        .cmd = PIDOCK_C_GET_FB,
+        .flags = 0,
+        .policy = pidock_genl_policy,
+        .doit = pidock_doit_getfb,
+        .dumpit = NULL,
+    }
+
 };
 
 static const struct genl_multicast_group pidock_multicast_groups[] = {
@@ -111,12 +247,9 @@ int pidock_nl_handle_damage(
 	// struct pidock_device *pidock = dev->dev_private;
 	struct rect rect;
 	struct sk_buff *skb;
-	struct nlattr  *nla;
+	// struct nlattr  *nla;
 	void *msg_head;
 	int rc;
-
-	int pitch = width * DIV_ROUND_UP(pfb->base.depth, 8);
-	int bytes = pitch * height;
 
 	/* Map framebuffer for access */
 	if (!pfb->obj->vmapping) {
@@ -130,62 +263,26 @@ int pidock_nl_handle_damage(
 			return 0;
 		}
 	}
-	DRM_INFO("pidock_nl_handle_damage: pfb:%p vmap:%p", pfb, pfb->obj->vmapping);
 
+    rect_set(&rect, x, y, width, height);
 
-	while(bytes > 0)
-	{
-		// Calculate packet size
-		int hline;
-		int len = bytes > PIDOCK_MSG_SIZE ? PIDOCK_MSG_SIZE : bytes;
-		int rows = len / pitch;
-		len = rows * pitch; // Don't want to truncate mid line
-		bytes -= len;
+	skb = genlmsg_new(PIDOCK_MSG_SIZE, GFP_KERNEL);
+	if (skb == NULL)
+        goto error;
 
-		// Determine number of rows we can send.
-		rows = rows < height ? rows : height;
-		rect_set(&rect, x, y, width, rows);
-		rect.pitch = pitch;
-
-		// DRM_INFO("Msg - Remaining: %d Bytes: %d Rows: %d Pitch: %d", bytes, len, rows, pitch);
-
-		skb = genlmsg_new(len + 32, GFP_KERNEL);
-		// skb = genlmsg_new(PIDOCK_MSG_SIZE, GFP_KERNEL);
-		// skb = genlmsg_new(GENLMSG_DEFAULT_SIZE, GFP_ATOMIC);
-		if (skb == NULL)
-			goto error;
-
-		msg_head = genlmsg_put(skb, 0, 0, &pidock_gnl_family, 0, PIDOCK_C_FB_DIRTY);
-		if (!msg_head) {
-			rc = -ENOMEM;
-			goto free;
-		}
-
-		rc = nla_put(skb, PIDOCK_A_TILE_RECT, sizeof(struct rect), &rect);
-		if (rc)
-			goto free;
-
-		nla = nla_reserve(skb, PIDOCK_A_TILE_DATA, len);
-		if (!nla) {
-			DRM_INFO("Tile data too large for buffer");
-			goto free;
-		}
-		/* Copy pixels from Framebuffer to message */
-		for(hline=0; hline < rows; ++hline) {
-			// void *tmp = kmalloc(pitch, GFP_KERNEL);
-			void *base = pfb->obj->vmapping + pfb->base.pitches[0] * (y+hline) + x;
-			memcpy(nla_data(nla) + (hline*pitch), base, pitch);
-		}
-
-		genlmsg_end(skb, msg_head);
-
-		rc = genlmsg_multicast(&pidock_gnl_family, skb, 0, 0, 0);
-		if (rc && rc != -ESRCH)
-			goto free;
-
-		height -= rows;
-		y += rows;
+    msg_head = genlmsg_put(skb, 0, 0, &pidock_gnl_family, 0, PIDOCK_C_FB_DIRTY);
+	if (msg_head == NULL) {
+	    rc = -ENOMEM;
+       	goto free;
 	}
+
+    nla_put(skb, PIDOCK_A_TILE_RECT, sizeof(struct rect), &rect);
+    nla_put_u32(skb, PIDOCK_A_FB_ID, pfb->base.base.id);
+	genlmsg_end(skb, msg_head);
+
+	rc = genlmsg_multicast(&pidock_gnl_family, skb, 0, 0, 0);
+	if (rc && rc != -ESRCH)
+	    goto free;
 
 	return 0;
 free:
