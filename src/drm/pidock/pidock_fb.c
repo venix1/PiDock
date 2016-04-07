@@ -46,7 +46,7 @@ static int pidock_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 
 	DRM_INFO("pidock_fb_mmap:");
 
-	DRM_INFO("%d + %d > %d", offset, size, info->fix.smem_len);
+	DRM_INFO("%ld + %ld > %d", offset, size, info->fix.smem_len);
 	if (offset + size > info->fix.smem_len)
 		return -EINVAL;
 
@@ -305,7 +305,19 @@ static void pidock_user_framebuffer_destroy(struct drm_framebuffer *fb)
 	kfree(pfb);
 }
 
+static int pidock_drm_fb_create_handle(struct drm_framebuffer *fb,
+								       struct drm_file *file_priv,
+								       unsigned int *handle)
+{
+	struct pidock_framebuffer *pfb = to_pidock_fb(fb);
+
+    DRM_INFO("pidock_framebuffer_create_handle");
+
+    return drm_gem_handle_create(file_priv, &pfb->obj->base, handle);
+}
+
 static const struct drm_framebuffer_funcs pidockfb_funcs = {
+    .create_handle = pidock_drm_fb_create_handle,
 	.destroy = pidock_user_framebuffer_destroy,
 	.dirty = pidock_user_framebuffer_dirty,
 };
