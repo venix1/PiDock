@@ -18,6 +18,8 @@
 
 #include "pidock_drv.h"
 
+struct pidock_device *pidock_dev;
+
 int pidock_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct pidock_device *pidock;
@@ -36,6 +38,10 @@ int pidock_driver_load(struct drm_device *dev, unsigned long flags)
 	if (ret)
 		goto err;
 
+	ret = pidock_output_init(dev);
+	if (ret)
+		goto err;
+
 	ret = pidock_fbdev_init(dev);
 	if (ret)
 		goto err;
@@ -48,6 +54,7 @@ int pidock_driver_load(struct drm_device *dev, unsigned long flags)
 	if (ret)
 		goto err_fb;
 
+	pidock_dev = pidock;
 	return 0;
 err_fb:
 	pidock_fbdev_cleanup(dev);
@@ -60,12 +67,18 @@ err:
 int pidock_driver_unload(struct drm_device *dev)
 {
 	struct pidock_device *pidock = dev->dev_private;
+	int i;
 
 	DRM_INFO("pidock_driver_unload:");
 
 	pidock_nl_cleanup(pidock);
 	drm_vblank_cleanup(dev);
 	pidock_fbdev_cleanup(dev);
+	for(i=0; i<PIDOCK_MAX_OUTPUT; ++i) {
+		if (pidock->output[i])
+			pidock_output_cleanup(dev, pidock->output[i]);
+			pidock->output[i] = NULL;
+	}
 	pidock_modeset_cleanup(dev);
 	kfree(pidock);
 	return 0;
