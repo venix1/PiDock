@@ -14,7 +14,7 @@ class EventManager(object, metaclass=Singleton):
 
     def emit(self, name, args=None):
         """Queue event for processing."""
-        self._queue((name, args))
+        self._queue.put((name, args))
 
     def update(self):
         """Process queue until empty."""
