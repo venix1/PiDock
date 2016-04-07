@@ -1,0 +1,4 @@
+cython
+msgpack-python
+pysdl2
+pyzmq
