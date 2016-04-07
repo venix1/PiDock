@@ -27,11 +27,16 @@
 #define PIDOCK_MINOR		0
 #define PIDOCK_PATCHLEVEL	1
 
+#define PIDOCK_MAX_OUTPUT   255
+
 #define to_pidock_bo(x) container_of(x, struct pidock_gem_object, base)
 #define to_pidock_fb(x) container_of(x, struct pidock_framebuffer, base)
 
 extern struct device pidock_bus;
 
+extern struct pidock_device *pidock_dev;
+
+// static struct pidock_device pidock_dev;
 
 struct pidock_gem_object {
 	struct drm_gem_object base;
@@ -53,6 +58,14 @@ struct pidock_framebuffer {
 	spinlock_t dirty_lock;
 };
 
+struct pidock_output {
+	unsigned char         idx;
+	struct drm_connector *connector;
+	struct drm_crtc      *crtc;
+	struct drm_encoder   *encoder;
+	struct pidock_fbdev  *fbdev;
+};
+
 struct pidock_device {
 	struct device *dev;
 	struct drm_device *ddev;
@@ -63,14 +76,24 @@ struct pidock_device {
 	uint32_t mode_buf_len;
 
 	uint32_t gnl_seq;
+
+	struct pidock_output* output[PIDOCK_MAX_OUTPUT];
 };
 
 int pidock_driver_unload(struct drm_device *dev);
 int pidock_driver_load(struct drm_device *dev, unsigned long flags);
 
-int pidock_connector_init(struct drm_device *dev, struct drm_encoder *encoder);
+int pidock_output_init(struct drm_device *dev);
+int pidock_output_cleanup(struct drm_device *dev, struct pidock_output *output);
+
+struct drm_crtc* pidock_crtc_init(struct drm_device *dev);
+int pidock_crtc_cleanup(struct drm_crtc* crtc);
+
+struct drm_connector* pidock_connector_init(struct drm_device *dev, struct drm_encoder *encoder);
+int pidock_connector_cleanup(struct drm_connector *connector);
 
 struct drm_encoder *pidock_encoder_init(struct drm_device *dev);
+int pidock_encoder_cleanup(struct drm_encoder *encoder);
 
 int pidock_fbdev_init(struct drm_device *dev);
 void pidock_fbdev_cleanup(struct drm_device *dev);
@@ -117,10 +140,5 @@ int pidock_nl_handle_damage(
 
 int pidock_bus_init(void);
 void pidock_bus_cleanup(void);
-
-
-
-
-
 
 #endif
