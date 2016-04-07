@@ -1,6 +1,10 @@
-PiDock/
-build/
+cython_debug/
 
 *.pyc
 *.sw?
 *.so
+*.o
+modules.order
+Module.symvers
+.*
+*.egg-info
