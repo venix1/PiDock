@@ -89,6 +89,10 @@ cdef class rfbClient:
         def __get__(self):
             return self._rfbClient.width
 
+    property bitsPerPixel:
+        def __get__(self):
+            return self._rfbClient.format.bitsPerPixel
+
     property encodingsString:
         def __get__(self):
             return self._rfbClient.appData.encodingsString
