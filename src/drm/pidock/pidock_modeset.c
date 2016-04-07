@@ -17,7 +17,7 @@
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
- #include <drm/drm_plane_helper.h>
+#include <drm/drm_plane_helper.h>
 #include "pidock_drv.h"
 
 static int pidock_vidreg_lock(void)
@@ -182,19 +182,19 @@ static const struct drm_crtc_funcs pidock_crtc_funcs = {
 	.page_flip = pidock_crtc_page_flip,
 };
 
-static int pidock_crtc_init(struct drm_device *dev)
+struct drm_crtc* pidock_crtc_init(struct drm_device *dev)
 {
 	struct drm_crtc *crtc;
 	DRM_INFO("pidock_crtc_init:");
 
 	crtc = kzalloc(sizeof(struct drm_crtc) + sizeof(struct drm_connector *), GFP_KERNEL);
 	if (crtc == NULL)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	drm_crtc_init(dev, crtc, &pidock_crtc_funcs);
 	drm_crtc_helper_add(crtc, &pidock_helper_funcs);
 
-	return 0;
+	return crtc;
 }
 
 static const struct drm_mode_config_funcs pidock_mode_funcs = {
@@ -205,7 +205,6 @@ static const struct drm_mode_config_funcs pidock_mode_funcs = {
 
 int pidock_modeset_init(struct drm_device *dev)
 {
-	struct drm_encoder *encoder;
 	DRM_INFO("pidock_modeset_init:");
 	drm_mode_config_init(dev);
 
@@ -221,12 +220,6 @@ int pidock_modeset_init(struct drm_device *dev)
 	dev->mode_config.funcs = &pidock_mode_funcs;
 
 	drm_mode_create_dirty_info_property(dev);
-
-	pidock_crtc_init(dev);
-
-	encoder = pidock_encoder_init(dev);
-
-	pidock_connector_init(dev, encoder);
 
 	return 0;
 }
