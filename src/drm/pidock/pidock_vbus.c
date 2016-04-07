@@ -1,6 +1,6 @@
 #include <linux/device.h>
 
-static char *Version = "0.0.01";
+// static char *Version = "0.0.01";
 
 static void pidock_bus_release(struct device *dev)
 {
@@ -40,6 +40,7 @@ static int pidock_bus_match(struct device *dev, struct device_driver *drv)
 	return 0;
 }
 
+/*
 static int pidock_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
 	if (add_uevent_var(env, "PIDOCKBUS_VERSION=%s", Version))
@@ -47,6 +48,7 @@ static int pidock_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 
 	return 0;
 }
+*/
 
 struct device pidock_bus = {
 	.init_name = "pidock0",
