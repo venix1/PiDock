@@ -28,12 +28,12 @@ static int pidock_driver_set_busid(struct drm_device *d, struct drm_master *m)
 	return 0;
 }
 
-static int pidock_enable_vblank(struct drm_device *dev, int crtc)
+static int pidock_enable_vblank(struct drm_device *dev, unsigned int pipe)
 {
 	return 0;
 }
 
-static void pidock_disable_vblank(struct drm_device *dev, int crtc)
+static void pidock_disable_vblank(struct drm_device *dev, unsigned int pipe)
 {
 }
 
