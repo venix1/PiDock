@@ -1,3 +1,3 @@
-from __future__ import absolute_import
+"""Required module for pyzre package."""
 
-from .zre import ZRE
+from .zre import ZRE  # noqa
