@@ -2,13 +2,15 @@
 """Export framebuffer object over VNC."""
 
 import asyncio
+import libdrm
 import msgpack
+import pidock.nl
+import rfb
 import sys
 import time
 
-import pyzre
-import rfb
-import pidock_nl
+from pidock.event import EventManager
+from pyzre.zre import ZRE
 
 from base64 import b64decode
 
@@ -21,17 +23,26 @@ def run(fn, *args):
         yield from asyncio.sleep(0)
 
 
-class Source(pyzre.ZRE):
+class Source(ZRE):
     """Class representing framebuffer output."""
 
     def __init__(self, loop):
         """constructor.  requires asyncio loop object."""
-        pyzre.ZRE.__init__(self, loop)
+        ZRE.__init__(self, loop)
 
-        # fp = open('/dev/fb1', 'r+b')
-        # print(fp.fileno())
-        # self.fb = mmap.mmap(fp.fileno(), 1680*1050*4)
-        # fb_ptr = memoryview(self.fb)
+        self.drm = libdrm.DRMCard('/dev/dri/card1')
+        self.drm.refresh()
+        # if self.drm.count_fbs < 1:
+        #     sys.exit(1)
+        r = self.drm.get_fb(23)
+        print(r)
+        size = r['height'] * r['pitch']
+
+        r = self.drm.map_dumb(1)
+        print(r)
+
+        self.fb = self.drm.mmap64(size, r['offset'])
+        print(self.fb)
 
         # TODO: Get resolution from DRM
         # For now deafult to 1920x1080 and resize later
@@ -39,7 +50,7 @@ class Source(pyzre.ZRE):
         self.width = 1920
         self.height = 1080
 
-        self.fb = bytearray(self.width*self.height*4)
+        # self.fb = bytearray(self.width*self.height*4)
         self.server = rfb.rfbServer([], self.width, self.height, 8, 3, 4,
                                     self.fb)
 
@@ -48,21 +59,33 @@ class Source(pyzre.ZRE):
         # self.server.greenShift = 8
         # self.server.blueShift = 0
 
-        self.pidock = pidock_nl.PiDockConnection(self.fb)
+        self.pidock = pidock.nl.PiDockSocket(self.fb)
 
         self.clock = time.time()
+
+        EventManager.register('fb/damage', self.on_damage)
+
+    def on_damage(self, args):
+        """EventManager callback for 'fb/damage' event."""
+        x, y, w, h = args
+        self.server.markRectAsModified((x, y), (w, h))
 
     def main_loop(self):
         """main processing function."""
         if self.server.isActive():
             self.pidock.run_once()
 
+            EventManager.update()
+
             # Fix to 60 FPS
             if time.time() - self.clock < .015:
                 return True
+            # 1 FPS
+            if time.time() - self.clock < 1:
+                return True
 
             # self.server.fillRect((0,0), (200,200), 0xFFFFFFFF)
-            self.server.markRectAsModified((0, 0), (self.width, self.height))
+            # self.server.markRectAsModified((0, 0), (self.width, self.height))
             self.server.processEvents(0)
             # time.sleep(1)
 
@@ -71,6 +94,12 @@ class Source(pyzre.ZRE):
     def on_hello(self, peer, msg):
         """handler for ZRE hello message."""
         self.hello(peer)
+        msg = {
+            'op': 'connect',
+            'width': 1680,
+            'height': 1050
+        }
+        self.whisper(peer, msgpack.packb(msg))
 
     def on_whisper(self, peer, msg):
         """handler for ZRE whisper message."""
@@ -94,6 +123,7 @@ class Source(pyzre.ZRE):
             self.whisper(peer, msgpack.packb(msg))
         else:
             raise Exception('Unkown op:' + str(op))
+
 
 instance = Source(asyncio.get_event_loop())
 
