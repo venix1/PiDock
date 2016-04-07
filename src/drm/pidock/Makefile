@@ -1,4 +1,7 @@
-pidock-y := pidock_connector.o pidock_drv.o pidock_encoder.o pidock_fb.o pidock_gem.o pidock_main.o pidock_modeset.o pidock_nl.o pidock_vbus.o
+pidock-y := pidock_connector.o pidock_drv.o pidock_encoder.o pidock_fb.o pidock_gem.o pidock_main.o pidock_modeset.o pidock_nl.o pidock_output.o pidock_vbus.o
+MY_CFLAGS += -g -DDEBUG
+ccflags-y += ${MY_CFLAGS}
+CC += ${MY_CFLAGS}
 
 obj-m += pidock.o
 
