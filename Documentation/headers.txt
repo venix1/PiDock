@@ -1,0 +1,3 @@
+Headers generated with 
+
+echo "#include <rfb/rfb.h>" | gcc -E -xc - > rfb.inc

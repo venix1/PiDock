@@ -295,6 +295,21 @@ cdef class rfbServer:
     def markRectAsModified(self, p1, p2):
         crfb.rfbMarkRectAsModified(self._rfbScreen, p1[0], p1[1], p2[0], p2[1])
 
+    def crc32Modified(self):
+        """Runs crc32 over 16x16 blocks for modifications."""
+        # calculate num width
+        # calculate num height
+        # ptr = self._framebuffer
+        # for x
+        # for y
+        #    crc = 0
+        #    offset = self._framebuffer + (height * pitch) + x
+        #    for range(16):
+        #       crc = crc32_16bytes(offset + pitch*i, 16*4, crc)
+        #    if crc != self.crcs[x][y]:
+        #       self.crcs[x][y] = self
+        #       self.markRectAsModified((x,y),(x+16,x+16))
+
     @property
     def framebuffer(self):
         return self._framebuffer

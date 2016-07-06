@@ -1,0 +1,9 @@
+NVIDIA GPU produces this.
+=========================
+$ xrandr --setprovideroutputsource modesetting NVIDIA-0
+X Error of failed request:  BadValue (integer parameter out of range for operation)
+  Major opcode of failed request:  139 (RANDR)
+  Minor opcode of failed request:  35 (RRSetProviderOutputSource)
+  Value in failed request:  0x279
+  Serial number of failed request:  16
+  Current serial number in output stream:  17

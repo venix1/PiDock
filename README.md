@@ -15,6 +15,20 @@ Requires kernel DRM module (with fbdev emulation? I want a console).  Userland
 daemon connects via netlink socket. Driver must support xrandr 1.4 and function
 as an output sink.
 
+Pluggable Encoder/Decoder
+ * Allow OpenCL encoders using GPU
+ * Multi-threaded encoding/decoding
+
+JPEG GPU
+ * http://developer.amd.com/resources/documentation-articles/articles-whitepapers/jpeg-decoding-with-run-length-encoding-a-cpu-and-gpu-approach/
+ * http://www.fastcompression.com/products/jpeg/cuda-jpeg.htm
+ * https://software.intel.com/en-us/articles/opencl-drivers
+ *  https://www.altera.com/support/support-resources/design-examples/design-software/opencl/jpeg-decoder.html
+ * https://github.com/kk1fff/jpeg-opencl
+ * https://sourceforge.net/projects/gpujpeg/
+ * http://developer.amd.com/tools-and-sdks/opencl-zone/amd-accelerated-parallel-processing-app-sdk/
+ * http://www.cse.cuhk.edu.hk/~ttwong/demo/dwtgpu/dwtgpu.html#gpudwt
+
 Userland software(python?) is responsible for
  * Client discovery using 0mq/ZRE.
    Discovery: http://rfc.zeromq.org/spec:20/ZRE
@@ -40,6 +54,12 @@ Network Protocol.(MsgPack)
 * Source connects to Sink using libVNCServer.
 * Source authenticates over VNC(Backchannel)
 * Possible VNC Heartbeat extension to maintain connection.
+
+Video Transfer Protocol
+-----------------------
+* Updates only
+* Encoder/Decoder
+* JPEG encoding frames
 
 VNC setup from server to client.
 --------------------------------

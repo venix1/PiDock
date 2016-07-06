@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 """Export framebuffer object over VNC."""
 
+# flake8: noqa: ignore=E702
+
 import asyncio
 import libdrm
 import msgpack
 import pidock.nl
-import rfb
 import sys
 import time
 
@@ -14,8 +15,11 @@ from pyzre.zre import ZRE
 
 from base64 import b64decode
 
-event_table = {}
+import pyximport; pyximport.install()
+import pidock.crc32
+from pidock.jpeg_encoder import JPEGEncoder
 
+event_table = {}
 
 def run(fn, *args):
     """Run a function indefinately as long as it returns True."""
@@ -34,7 +38,7 @@ class Source(ZRE):
         self.drm.refresh()
         # if self.drm.count_fbs < 1:
         #     sys.exit(1)
-        r = self.drm.get_fb(23)
+        r = self.drm.get_fb(27)
         print(r)
         size = r['height'] * r['pitch']
 
@@ -51,7 +55,7 @@ class Source(ZRE):
         self.height = 1080
 
         # self.fb = bytearray(self.width*self.height*4)
-        self.server = rfb.rfbServer([], self.width, self.height, 8, 3, 4,
+        self.server = JPEGEncoder([], self.width, self.height, 8, 3, 4,
                                     self.fb)
 
         # Framebuffer BGRA
@@ -67,12 +71,18 @@ class Source(ZRE):
 
     def on_damage(self, args):
         """EventManager callback for 'fb/damage' event."""
+        print(args)
         x, y, w, h = args
-        self.server.markRectAsModified((x, y), (w, h))
+        x2 = x + w
+        y2 = y + h
+        # Not receiving full update.
+        # for testing we override.
+        # self.server.mark_rect_as_modified(x, y, x2, y2)
+        self.server.mark_rect_as_modified(0, 0, self.width, self.height) 
 
     def main_loop(self):
         """main processing function."""
-        if self.server.isActive():
+        if self.server.is_active:
             self.pidock.run_once()
 
             EventManager.update()
@@ -86,7 +96,7 @@ class Source(ZRE):
 
             # self.server.fillRect((0,0), (200,200), 0xFFFFFFFF)
             # self.server.markRectAsModified((0, 0), (self.width, self.height))
-            self.server.processEvents(0)
+            self.server.process_events(0)
             # time.sleep(1)
 
         return True
