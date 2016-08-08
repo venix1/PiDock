@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Client
+namespace PiDock.Sink
 {
 	class MainClass
 	{
