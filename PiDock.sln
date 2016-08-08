@@ -1,9 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PiDock", "PiDock\PiDock.csproj", "{C9270A69-5206-4ACE-A02A-597A94C5D806}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Source", "PiDock\Source.csproj", "{C9270A69-5206-4ACE-A02A-597A94C5D806}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibDRM.Net", "LibDRM.Net\LibDRM.Net.csproj", "{0353DE9F-AA9E-429B-A81B-6614EF185095}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unittests", "Unittests\Unittests.csproj", "{FBAFC9B6-FA04-41C6-B93B-6CC31FB9A454}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sink", "Client\Sink.csproj", "{3934CC84-B193-4D6A-B7B7-630590B9BCD7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Netlink", "Netlink\Netlink.csproj", "{AB4B773C-4B1E-4485-B22D-DA466306075F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,9 +21,21 @@ Global
 		{0353DE9F-AA9E-429B-A81B-6614EF185095}.Debug|x86.Build.0 = Debug|Any CPU
 		{0353DE9F-AA9E-429B-A81B-6614EF185095}.Release|x86.ActiveCfg = Release|Any CPU
 		{0353DE9F-AA9E-429B-A81B-6614EF185095}.Release|x86.Build.0 = Release|Any CPU
+		{3934CC84-B193-4D6A-B7B7-630590B9BCD7}.Debug|x86.ActiveCfg = Debug|x86
+		{3934CC84-B193-4D6A-B7B7-630590B9BCD7}.Debug|x86.Build.0 = Debug|x86
+		{3934CC84-B193-4D6A-B7B7-630590B9BCD7}.Release|x86.ActiveCfg = Release|x86
+		{3934CC84-B193-4D6A-B7B7-630590B9BCD7}.Release|x86.Build.0 = Release|x86
+		{AB4B773C-4B1E-4485-B22D-DA466306075F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{AB4B773C-4B1E-4485-B22D-DA466306075F}.Debug|x86.Build.0 = Debug|Any CPU
+		{AB4B773C-4B1E-4485-B22D-DA466306075F}.Release|x86.ActiveCfg = Release|Any CPU
+		{AB4B773C-4B1E-4485-B22D-DA466306075F}.Release|x86.Build.0 = Release|Any CPU
 		{C9270A69-5206-4ACE-A02A-597A94C5D806}.Debug|x86.ActiveCfg = Debug|x86
 		{C9270A69-5206-4ACE-A02A-597A94C5D806}.Debug|x86.Build.0 = Debug|x86
 		{C9270A69-5206-4ACE-A02A-597A94C5D806}.Release|x86.ActiveCfg = Release|x86
 		{C9270A69-5206-4ACE-A02A-597A94C5D806}.Release|x86.Build.0 = Release|x86
+		{FBAFC9B6-FA04-41C6-B93B-6CC31FB9A454}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FBAFC9B6-FA04-41C6-B93B-6CC31FB9A454}.Debug|x86.Build.0 = Debug|Any CPU
+		{FBAFC9B6-FA04-41C6-B93B-6CC31FB9A454}.Release|x86.ActiveCfg = Release|Any CPU
+		{FBAFC9B6-FA04-41C6-B93B-6CC31FB9A454}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

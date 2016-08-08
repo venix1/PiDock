@@ -2,9 +2,9 @@
 
 namespace PiDock.Source
 {
-	public class PiDockNL
+	public class PiDockSocket
 	{
-		public PiDockNL ()
+		public PiDockSocket ()
 		{
 		}
 	}
