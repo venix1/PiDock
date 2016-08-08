@@ -2,9 +2,9 @@
 
 namespace Netlink
 {
-	public class MyClass
+	public class Netlink
 	{
-		public MyClass ()
+		public Netlink ()
 		{
 		}
 	}
