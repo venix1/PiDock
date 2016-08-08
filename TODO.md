@@ -1,3 +1,11 @@
+* Unitests for Benchmarks
+* LibDRM.Net
+* class TileEncoder
+* class ZRE
+* class ITransport
+* class EDID
+* Port Crc32C.Net for linux
+
 * replace RFB class
 * Wrap libjpeg api
 * Generate CRC32 blocks
@@ -8,13 +16,6 @@
 * Unittests as benchmarks
  * test crc32 encoding speed
  * test jpeg encoding speed
-
-* .NET evaluation
-  * CRC32 benchmarks(Not looking good)
-  * libjpeg-turbo performance
-  * CRC32 library may benefit cython as well
-  * Port Crc32C.Net linux
-  * Unittests for benchmarks
 
 * Configuration file. 
   * Contains Broadcast IP/Port
